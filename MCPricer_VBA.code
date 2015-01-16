@@ -1,0 +1,507 @@
+Option Base 1
+Option Explicit
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'  ELS MC Pricer - Excel template ver.0.2                                               '
+'       by Boram Hwang (15/01/05)                                                       '
+'                                                                                       '
+'  Main features                                                                        '
+'   (1) Pricing arbitrary structured ELS                                                '
+'       (This version is only capable of with plain step-down, and knock-out call       '
+'        However, necessary extension is not difficult)                                 '
+'   (2) Calculating price and greeks                                                    '
+'       (Supported greeks: delta, gamma, vega, rho, theta, volga, vanna                 '
+'        Result types are selectable)                                                   '
+'                                                                                       '
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' Hard coded features
+'  - Maximum underlying size: 3
+'  - Term structure: maximum axis size 20
+'  - Surface: maximum strike axis size 20
+
+' Structure: interest rate (constant, term structure)
+Public Type VBARate
+    RateType As Long            ' Type: 0 - constant / 1 - term structure
+    RateSize As Long
+    
+    Ratet(1 To 20) As Single
+    Rater(1 To 20) As Single
+End Type
+
+' Structure: discount rate (constant, term structure)
+Public Type VBAYTM
+    YTMType As Long             ' Type: 0 - constant / 1 - term structure
+    YTMSize As Long
+    
+    YTMt(1 To 20) As Single
+    YTMr(1 To 20) As Single
+End Type
+
+' Structure: continuous dividend (constant, term structure)
+Public Type VBADiv
+    DivType As Long             ' Type: 0 - constant / 1 - term structure
+    DivSize As Long
+    
+    Divt(1 To 20) As Single
+    Divq(1 To 20) As Single
+End Type
+
+' Structure: volatility (constant, term structure, surface)
+Public Type VBAVol
+    VolType As Long             ' Type: 0 - constant / 1 - term structure / 2 - surface
+    VolSizet As Long
+    VolSizeK As Long
+    
+    Volt(1 To 20) As Single
+    VolK(1 To 20) As Single
+    Volv(1 To 400) As Single
+End Type
+
+' Structure: underlying
+Public Type VBAUnderlying
+    S As Single                 ' Current Price
+    rf As VBARate               ' Risk-free rate
+    Div As VBADiv               ' Dividend (limited to continuous case)
+    vol As VBAVol               ' Volatility
+End Type
+
+' Structure: payoff
+Public Type VBAPayoff
+    t As Long                   ' Time to maturity date for the sequence
+    T_pay As Long               ' Time to payment date for the sequence
+    BermudanType As Long        ' Bermudan type: 0 - Final / 1 - Bermudan / 2 - Coupon
+    PayoffType As Long          ' Payoff type: see PayoffType function
+    RefPriceType As Long        ' Reference price type
+    k As Single                 ' Strike price
+    UpBarrier As Single         ' Up barrier for the sequence
+    DownBarrier As Single       ' Down barrier for the sequence
+    TotalUpBarrier As Single    ' Global up barrier
+    TotalDownBarrier As Single  ' Global down barrier
+    Participation As Single     ' Participation rate
+    Coupon As Single            ' Coupon rate
+    Dummy As Single             ' Dummy coupon rate
+End Type
+
+' Structure: sending VBA data to CUDA DLL
+Public Type VBAData
+    StockSize As Long                   ' No. of underlyings
+    ScheduleSize As Long                ' No. of schedules
+    
+    Stock(1 To 3) As VBAUnderlying      ' Underlying info
+    BasePrice(1 To 3) As Single         ' Base price
+    Correl(1 To 9) As Single            ' Correlation (arranged in 1D)
+    Quanto(1 To 3) As Single            ' Quanto adjustment factor (fx vol * fx correlation)
+    Schedule(1 To 60) As VBAPayoff      ' Schedule info
+    YTM As VBAYTM                       ' Discount rate
+    
+    SimN As Long                        ' Simulation number (of GPU computing)
+    SimMode As Long                     ' Result coverage: 0 - Price / 1 - Delta, Gamma, Vega / 2 - Rho, Theta / 3 - Vanna, Volga
+    blockN As Long                      ' Block number to use in CUDA MC
+    threadN As Long                     ' Thread number to use in CUDA MC
+End Type
+
+' Structure: getting MC results to VBA
+Public Type Result
+    price As Single                     ' ELS price
+    delta(1 To 3) As Single             ' Delta by underlying
+    gamma(1 To 3) As Single             ' Gamma by underlying
+    vega(1 To 3) As Single              ' Vega by underlying
+    rho(1 To 3) As Single               ' Rho by underlying currency (Hard coded: first underlying should be KOSPI200)
+    theta As Single                     ' Theta
+    vanna(1 To 3) As Single             ' Vanna by underlying
+    volga(1 To 3) As Single             ' Volga by underlying
+End Type
+
+' CUDA DLL
+Public Declare Function Pricer_MC Lib "C:\Users\Administrator\Desktop\Project\ELS\Pricer_MC_v2\Release\Pricer_MC_v2.dll" _
+                                  (data As VBAData) As Result
+
+' Subroutine to price an ELS
+Sub ELS_KH_Pricer()
+    Range("StartTime").Value = Now
+    
+    Dim i As Integer, j As Integer, l As Integer, m As Integer
+    Dim data As VBAData
+    Dim Stock0 As VBAUnderlying, Rf0 As VBARate, Div0 As VBADiv, Vol0 As VBAVol
+    Dim RateType As Long, RateSize As Long
+    Dim DivType As Long, DivSize As Long
+    Dim VolType As Long, VolSizet As Long, VolSizeK As Long
+   
+    ' Get historic underlying records
+    i = 1
+    Do While Range("Index_KOSPI").Offset(i, 0).Value <> Range("Date").Value And Range("Index_KOSPI").Offset(i, 0).Value > 0
+        i = i + 1
+    Loop
+    Range("StockPrice")(1, 1).Value = Range("Index_KOSPI").Offset(i, 1).Value
+    Range("DivYield")(1, 1).Value = Range("Index_KOSPI").Offset(i, 2).Value
+    Range("OBMSVol")(1, 1).Value = Range("Index_KOSPI").Offset(i, 3).Value
+    
+    i = 1
+    Do While Range("Index_HSCEI").Offset(i, 0).Value <> Range("Date").Value And Range("Index_HSCEI").Offset(i, 0).Value > 0
+        i = i + 1
+    Loop
+    Range("StockPrice")(1, 2).Value = Range("Index_HSCEI").Offset(i, 1).Value
+    Range("DivYield")(1, 2).Value = Range("Index_HSCEI").Offset(i, 2).Value
+    Range("OBMSVol")(1, 2).Value = Range("Index_HSCEI").Offset(i, 3).Value
+    
+    Range("StockPrice")(1, 1).Value = Range("Index_HSCEI").Offset(i, 1).Value
+    Range("DivYield")(1, 1).Value = Range("Index_HSCEI").Offset(i, 2).Value
+    Range("OBMSVol")(1, 1).Value = Range("Index_HSCEI").Offset(i, 3).Value
+    
+    i = 1
+    Do While Range("HistCorr").Offset(i, 0).Value <> Range("Date").Value And Range("HistCorr").Offset(i, 0).Value > 0
+        i = i + 1
+    Loop
+    Range("Correlation")(1, 1).Value = 1
+    Range("Correlation")(1, 2).Value = Range("HistCorr").Offset(i, 1).Value
+    Range("Correlation")(2, 1).Value = Range("HistCorr").Offset(i, 1).Value
+    Range("Correlation")(2, 2).Value = 1
+   
+   
+''''' Underlying info section '''''
+    ' Set amount of underlyings
+    data.StockSize = Range("AssetNum").Value
+    For i = 1 To data.StockSize
+        
+        ' Set risk-free rate
+        Rf0.RateType = ParamType(Range("RateType")(1, i).Value)
+        ' Constant case (not define yet)
+        If Rf0.RateType = 0 Then
+            Rf0.RateSize = 1
+        ' Term structure case
+        ElseIf Rf0.RateType = 1 Then
+            Rf0.RateSize = 0
+            
+            ' KRW Curve: KRW IRS
+            If Range("StockCurncy")(1, i).Value = "KRW" Then
+                j = 1
+                Do While Range("RateCurve_KRW").Offset(0, j).Value > 0
+                    Rf0.Ratet(j) = Range("RateCurve_KRW").Offset(0, j).Value / 360#
+                    Rf0.RateSize = Rf0.RateSize + 1
+                    j = j + 1
+                Loop
+                
+                j = 1
+                Do While Range("RateCurve_KRW").Offset(j, 0).Value < Range("Date").Value
+                    j = j + 1
+                Loop
+                
+                For l = 1 To Rf0.RateSize
+                    Rf0.Rater(l) = Range("RateCurve_KRW").Offset(j, l).Value
+                Next l
+                
+            ' HKD Curve: HKD IRS
+            ElseIf Range("StockCurncy")(1, i).Value = "HKD" Then
+                j = 1
+                Do While Range("RateCurve_HKD").Offset(0, j).Value > 0
+                    Rf0.Ratet(j) = Range("RateCurve_HKD").Offset(0, j).Value / 360#
+                    Rf0.RateSize = Rf0.RateSize + 1
+                    j = j + 1
+                Loop
+                
+                j = 1
+                Do While Range("RateCurve_HKD").Offset(j, 0).Value < Range("Date").Value
+                    j = j + 1
+                Loop
+                
+                For l = 1 To Rf0.RateSize
+                    Rf0.Rater(l) = Range("RateCurve_HKD").Offset(j, l).Value
+                Next l
+            End If
+
+        End If
+            
+        ' Set dividend
+        Div0.DivType = ParamType(Range("DivType")(1, i).Value)
+        ' Constant case
+        If Div0.DivType = 0 Then
+            Div0.DivSize = 1
+            Div0.Divq(1) = Range("DivYield")(1, i).Value
+            
+        ' Term structure case (not defined yet)
+        ElseIf Div0.DivType = 1 Then
+            For j = 1 To Div0.DivSize
+            Next j
+        End If
+        
+        ' Set volatility
+        Vol0.VolType = ParamType(Range("VolType")(1, i).Value)
+        ' Constant case
+        If Vol0.VolType = 0 Then
+            Vol0.VolSizet = 1
+            Vol0.VolSizeK = 1
+            Vol0.Volv(1) = Range("OBMSVol")(1, i).Value
+            
+        ' Term structure case (not yet defined)
+        ElseIf Vol0.VolType = 1 Then
+            For j = 1 To Vol0.VolSizet
+            Next j
+            
+        ' Surface case
+        ElseIf Vol0.VolType = 2 Then
+            If Range("Underlying")(1, i).Value = "KOSPI200" Then
+                j = 0
+                Do While Range("LVKOSPI").Offset(j, 0).Value < Range("Date").Value
+                    j = j + 10
+                Loop
+                If Range("LVKOSPI").Offset(j, 0).Value > Range("Date").Value Then
+                    j = j - 10
+                End If
+                
+                ' Set strike axis size (Hardcoded!)
+                Vol0.VolSizeK = 17
+                For l = 1 To Vol0.VolSizeK
+                    Vol0.VolK(l) = Range("LVKOSPI").Offset(j, l).Value * Range("StockPrice")(1, i)
+                Next l
+                
+                ' Set time axis size (Hardcoded!)
+                Vol0.VolSizet = 9
+                For l = 1 To Vol0.VolSizet
+                    Vol0.Volt(l) = Range("LVKOSPI").Offset(j + l, 0).Value / 360#
+                Next l
+                
+                ' Arrange local volatility
+                For l = 1 To Vol0.VolSizet
+                    For m = 1 To Vol0.VolSizeK
+                        Vol0.Volv((l - 1) * Vol0.VolSizeK + m) = Range("LVKOSPI").Offset(j + l, m).Value
+                    Next m
+                Next l
+                
+            ElseIf Range("Underlying")(1, i).Value = "HSCEI" Then
+                j = 0
+                Do While Range("LVHSCEI").Offset(j, 0).Value < Range("Date").Value
+                    j = j + 10
+                Loop
+                If Range("LVHSCEI").Offset(j, 0).Value > Range("Date").Value Then
+                    j = j - 10
+                End If
+                
+                ' Set strike axis size (Hardcoded!)
+                Vol0.VolSizeK = 17
+                For l = 1 To Vol0.VolSizeK
+                    Vol0.VolK(l) = Range("LVHSCEI").Offset(j, l).Value * Range("StockPrice")(1, i)
+                Next l
+                
+                ' Set time axis size (Hardcoded!)
+                Vol0.VolSizet = 9
+                For l = 1 To Vol0.VolSizet
+                    Vol0.Volt(l) = Range("LVHSCEI").Offset(j + l, 0).Value / 360#
+                Next l
+                
+                ' Arrange local volatility
+                For l = 1 To Vol0.VolSizet
+                    For m = 1 To Vol0.VolSizeK
+                        Vol0.Volv((l - 1) * Vol0.VolSizeK + m) = Range("LVHSCEI").Offset(j + l, m).Value
+                    Next m
+                Next l
+            End If
+                
+        End If
+        
+        ' Input underlying info
+        Stock0.S = Range("StockPrice")(1, i).Value
+        Stock0.rf = Rf0
+        Stock0.Div = Div0
+        Stock0.vol = Vol0
+        data.Stock(i) = Stock0
+        data.BasePrice(i) = Range("BasePrice")(1, i).Value
+    Next i
+    
+    ' Correlation (raw correlation matrix)
+    For i = 1 To data.StockSize
+        For j = 1 To data.StockSize
+            data.Correl((i - 1) * data.StockSize + j) = Range("Correlation")(i, j).Value
+        Next j
+    Next i
+    
+    ' Quanto adjustment
+    Dim volfx1 As Double, volfx2 As Double, volfx As Double, corrfx As Double, corrS As Double
+    For i = 1 To data.StockSize
+        If Range("StockCurncy")(1, i).Value = "KRW" Then
+            Range("QuantoAdj")(1, i).Value = 0
+        ElseIf Range("StockCurncy")(1, i).Value = "HKD" Then
+            j = 1
+            Do While Range("HistCorr").Offset(j, 0).Value < Range("Date").Value
+                j = j + 1
+            Loop
+            corrS = Range("HistCorr").Offset(j, 2).Value
+            corrfx = Range("HistCorr").Offset(j, 3).Value
+            
+            j = 1
+            Do While Range("FX").Offset(j, 0).Value < Range("Date").Value
+                j = j + 1
+            Loop
+            volfx1 = Range("FX").Offset(j, 2).Value
+            volfx2 = Range("FX").Offset(j, 3).Value
+            volfx = Sqr(volfx1 * volfx1 + 2 * corrfx * volfx1 * volfx2 + volfx2 * volfx2)
+            Range("QuantoAdj")(1, i).Value = corrS * volfx
+        End If
+        data.Quanto(i) = Range("QuantoAdj")(1, i).Value
+    Next i
+    
+''''' Payoff section '''''
+    ' Set schedule size
+    Dim payoff0 As VBAPayoff
+    
+    i = 1
+    data.ScheduleSize = 0
+    Do While Range("ScheduleIndex")(i, 1).Value > 0
+        If Range("ExpiryDate")(i, 1).Value >= Range("Date").Value Then
+            
+            ' Time to expire date (in days)
+            payoff0.t = DateDiff("d", Range("Date").Value, Range("ExpiryDate")(i, 1).Value)
+            ' Time to payment date (in days)
+            payoff0.T_pay = DateDiff("d", Range("Date").Value, Range("PaymentDate")(i, 1).Value)
+            ' Bermudan type
+            If Range("ScheduleIndex")(i + 1, 1).Value > 0 Then
+                payoff0.BermudanType = 1
+            Else
+                payoff0.BermudanType = 0
+            End If
+
+            ' Payoff type
+            payoff0.PayoffType = PayoffType(Range("PayoffType")(i, 1).Value)
+            ' Reference price type
+            payoff0.RefPriceType = Range("RefPriceType")(i, 1).Value
+        
+            ' Strike price
+            payoff0.k = Range("Strike")(i, 1).Value
+            ' Global down barrier
+            payoff0.TotalDownBarrier = Range("TotalDownBarrier").Value
+            ' Global up barrier
+            payoff0.TotalUpBarrier = Range("TotalUpBarrier").Value
+            ' Down barrier for the sequence
+            payoff0.DownBarrier = Range("DownBarrier")(i, 1).Value
+            ' Up barrier for the sequence
+            payoff0.UpBarrier = Range("UpBarrier")(i, 1).Value
+            
+            ' Coupon amount (in percentage)
+            payoff0.Coupon = Range("Coupon")(i, 1).Value
+            ' Dummy coupon amount (in percentage)
+            payoff0.Dummy = Range("Dummy")(i, 1).Value
+            
+            ' Participation rate (hardcorded)
+            payoff0.Participation = 1
+                    
+            data.ScheduleSize = data.ScheduleSize + 1
+            data.Schedule(data.ScheduleSize) = payoff0
+        End If
+        i = i + 1
+    Loop
+    
+    ' Set discount rate
+    Dim YTM As VBAYTM
+    YTM.YTMType = ParamType(Range("YTMType").Value)
+    ' Constant case (not defined yet)
+    If YTM.YTMType = 0 Then
+        YTM.YTMSize = 1
+    ' Term structure case
+    ElseIf YTM.YTMType = 1 Then
+        i = 1
+        Do While Range("RateCurve_KRW").Offset(0, i).Value > 0
+            YTM.YTMt(i) = Range("RateCurve_KRW").Offset(0, i).Value / 360#
+            YTM.YTMSize = YTM.YTMSize + 1
+            i = i + 1
+        Loop
+        
+        i = 1
+        Do While Range("RateCurve_KRW").Offset(i, 0).Value < Range("Date").Value
+            i = i + 1
+        Loop
+        
+        For j = 1 To YTM.YTMSize
+            YTM.YTMr(j) = Range("RateCurve_KRW").Offset(i, j).Value
+        Next j
+    End If
+    data.YTM = YTM
+    
+    ' Call CUDA MC pricer
+    data.SimN = Range("SimN").Value
+    data.SimMode = Range("SimMode").Value
+    data.blockN = 4
+    data.threadN = 160
+    Dim MCResult As Result
+    MCResult = Pricer_MC(data)
+    
+    ' Arrange results
+    With Range("Result")
+        .Offset(0, 1) = MCResult.price
+        .Offset(4 * data.StockSize + 1, 1) = MCResult.theta
+        For i = 1 To data.StockSize
+        .Offset(i, 1) = MCResult.delta(i) * 0.01 * data.Stock(i).S
+        .Offset(data.StockSize + i, 1) = MCResult.gamma(i) * 0.01 * data.Stock(i).S * 0.01 * data.Stock(i).S
+        .Offset(2 * data.StockSize + i, 1) = MCResult.vega(i)
+        .Offset(3 * data.StockSize + i, 1) = MCResult.rho(i) * 0.001
+        .Offset(4 * data.StockSize + 1 + i, 1) = MCResult.vanna(i) * 0.01 * data.Stock(i).S
+        .Offset(5 * data.StockSize + 1 + i, 1) = MCResult.volga(i)
+        Next i
+    End With
+
+    Range("EndTime").Value = Now
+    
+End Sub
+
+
+' Return parameter type
+Function ParamType(typestr As String) As Long
+    Dim typenum As Long
+    
+    Select Case typestr
+        Case "Fixed"
+            typenum = 0
+        Case "Term"
+            typenum = 1
+        Case "Surface"
+            typenum = 2
+        Case Else
+            typenum = -1
+    End Select
+    
+    ParamType = typenum
+End Function
+
+' Return bermudan type
+Function BermudanType(num As Long, ScheduleSize As Long, typestr As String) As Long
+    Dim typenum As Long
+    
+    If (num = ScheduleSize) Then
+        typenum = 0
+    ElseIf (typestr <> "COUPON") Then
+        typenum = 1
+    Else
+        typenum = 2
+    End If
+    
+    BermudanType = typenum
+End Function
+
+' Return payoff type
+Function PayoffType(typestr As String) As Long
+    Dim typenum As Long
+    
+    Select Case typestr
+        Case "CALL"
+            typenum = 0
+        Case "PUT"
+            typenum = 1
+        Case "DIGITCALL"
+            typenum = 2
+        Case "DIGITPUT"
+            typenum = 3
+        Case "KOCALL"
+            typenum = 4
+        Case "KICALL"
+            typenum = 5
+        Case "KOPUT"
+            typenum = 6
+        Case "KIPUT"
+            typenum = 7
+    End Select
+
+    PayoffType = typenum
+End Function
+
+
+
+
