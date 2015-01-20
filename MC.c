@@ -79,6 +79,7 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(struct VBAData* Data)
 	// Time axis size: Max 20 (just my purpose)
 	float YTMt_[20] = {0}, YTMFixed_, YTMCurve_[20] = {0};
 
+	int isStrikePriceQuote_ = Data->isStrikePriceQuote;
 	int SimN_ = Data->SimN;
 	int SimMode_ = Data->SimMode;
 	int blockN_ = Data->blockN;
@@ -254,7 +255,7 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(struct VBAData* Data)
 		   VolType_, VolSize_t_, VolSize_K_, Volt_, VolK_, VolFixed_, VolCurve_, VolSurf_,
 		   YTMType_, YTMSize_, YTMt_, YTMFixed_, YTMCurve_,
 		   correl_, Quanto_,
-		   SimN_, SimMode_, blockN_, threadN_,
+		   isStrikePriceQuote_, SimN_, SimMode_, blockN_, threadN_,
 		   result);
 
 	// Arrange result

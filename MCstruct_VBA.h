@@ -75,6 +75,7 @@ struct VBAData{
 	int SimMode;
 	int blockN;
 	int threadN;
+	int isStrikePriceQuote;
 };
 
 struct VBAResult{

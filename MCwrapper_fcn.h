@@ -17,7 +17,7 @@ void CalcMC(int StockSize_, float* StockPrice_, float* BasePrice_,
  			int* VolType_, int* VolSizet_, int* VolSizeK_, float* Volt_, float* VolK_, float* VolFixed_, float* VolCurve_, float* VolSurf_,
 			int YTMType_, int YTMSize_, float* YTMt_, float YTMFixed_, float* YTMCurve_,
 			float* correl_, float* Quanto_,
-			int SimN_, int SimMode_, int blockN_, int threadN_, 
+			int isStrikePriceQuote_, int SimN_, int SimMode_, int blockN_, int threadN_,
 			struct VBAResult* res);
 
 

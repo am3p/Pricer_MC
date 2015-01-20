@@ -1,4 +1,4 @@
-LIBRARY	Pricer_MC_v2
+LIBRARY	MC_Pricer
 
 EXPORTS
 	Pricer_MC

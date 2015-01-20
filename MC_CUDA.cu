@@ -45,7 +45,7 @@ __constant__ float Quanto[3];
 
 // Global Functions: functions are called in CalcMC
 __global__ void InitSeed(curandState *state, const int threadN);
-__global__ void MC(curandState *state, const int StockSize, const int ScheduleSize, const int SimMode, const int threadN, Result *result);
+__global__ void MC(curandState *state, const int StockSize, const int ScheduleSize, const int SimMode, const int isStrikePriceQuote, const int threadN, Result *result);
 
 // Device functions: functions are called in global functions
 __device__ float YTMInterp(float t);												// YTM rate interp/extrapolation
@@ -72,7 +72,7 @@ void CalcMC(int StockSize_, float* StockPrice_, float* BasePrice_,
  			int* VolType_, int* VolSizet_, int* VolSizeK_, float* Volt_, float* VolK_, float* VolFixed_, float* VolCurve_, float* VolSurf_,
 			int YTMType_, int YTMSize_, float* YTMt_, float YTMFixed_, float* YTMCurve_,
 			float* correl_, float* Quanto_,
-			int SimN_, int SimMode_, int blockN_, int threadN_, 
+			int isStrikePriceQuote_, int SimN_, int SimMode_, int blockN_, int threadN_, 
 			struct VBAResult *result){
 
 	// GPU parallelization: block/thread for CUDA cores
@@ -213,7 +213,7 @@ void CalcMC(int StockSize_, float* StockPrice_, float* BasePrice_,
 
 	// Main MC part (the repeat number is just own purpose)
 	for (int i = 0; i < SimN_; i++){
-		MC<<<blockN, threadN>>>(devStates, StockSize_, ScheduleSize_, SimMode_, threadN, devResults);
+		MC<<<blockN, threadN>>>(devStates, StockSize_, ScheduleSize_, SimMode_, isStrikePriceQuote_, threadN, devResults);
 		cudaMemcpy(hostResults, devResults, blockN * threadN * sizeof(Result), cudaMemcpyDeviceToHost);
 		int resind = 0;
 		// Copying MC results
@@ -255,7 +255,7 @@ __global__ void InitSeed(curandState *state, const int threadN)
 
 // Main Monte Carlo part
 __global__ void MC(curandState *state, 
-				   const int StockSize, const int ScheduleSize, const int SimMode, const int threadN,
+				   const int StockSize, const int ScheduleSize, const int SimMode, const int isStrikePriceQuote, const int threadN,
 				   Result *result){ 
 	int id = threadIdx.x + blockIdx.x * threadN; 
 	int t = 0; float dt = 1.0f/365.0f;
@@ -436,60 +436,122 @@ __global__ void MC(curandState *state,
 		ytmp = ytm + 0.001;
 
 		for(int j = 0; j < StockSize; j++){
-			S_MC_CF[j] = exp(logS_MC[j])/BasePrice[j] * 100.0f;
-			S_MCmin_CF[j] = exp(logS_MCmin[j])/BasePrice[j] * 100.0f;
-			S_MCmax_CF[j] = exp(logS_MCmax[j])/BasePrice[j] * 100.0f;
+			if (isStrikePriceQuote == 1){
+				S_MC_CF[j] = exp(logS_MC[j]);
+				S_MCmin_CF[j] = exp(logS_MCmin[j]);
+				S_MCmax_CF[j] = exp(logS_MCmax[j]);
+			}
+			else if (isStrikePriceQuote == 0){
+				S_MC_CF[j] = exp(logS_MC[j])/BasePrice[j] * 100.0f;
+				S_MCmin_CF[j] = exp(logS_MCmin[j])/BasePrice[j] * 100.0f;
+				S_MCmax_CF[j] = exp(logS_MCmax[j])/BasePrice[j] * 100.0f;
+			}
 		}
 
 		if (SimMode > 0){
-			for (int j = 0; j < StockSize; j++){
-				S_MC_CF_Sp[j] = exp(logS_MC_Sp[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_Sp[j] = exp(logS_MCmin_Sp[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_Sp[j] = exp(logS_MCmax_Sp[j])/BasePrice[j] * 100.0f;
+			if (isStrikePriceQuote == 1){
+				for (int j = 0; j < StockSize; j++){
+					S_MC_CF_Sp[j] = exp(logS_MC_Sp[j]);
+					S_MCmin_CF_Sp[j] = exp(logS_MCmin_Sp[j]);
+					S_MCmax_CF_Sp[j] = exp(logS_MCmax_Sp[j]);
 
-				S_MC_CF_Sm[j] = exp(logS_MC_Sm[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_Sm[j] = exp(logS_MCmin_Sm[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_Sm[j] = exp(logS_MCmax_Sm[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_Sm[j] = exp(logS_MC_Sm[j]);
+					S_MCmin_CF_Sm[j] = exp(logS_MCmin_Sm[j]);
+					S_MCmax_CF_Sm[j] = exp(logS_MCmax_Sm[j]);
 
-				S_MC_CF_vp[j] = exp(logS_MC_vp[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_vp[j] = exp(logS_MCmin_vp[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_vp[j] = exp(logS_MCmax_vp[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_vp[j] = exp(logS_MC_vp[j]);
+					S_MCmin_CF_vp[j] = exp(logS_MCmin_vp[j]);
+					S_MCmax_CF_vp[j] = exp(logS_MCmax_vp[j]);
 
-				S_MC_CF_vm[j] = exp(logS_MC_vm[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_vm[j] = exp(logS_MCmin_vm[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_vm[j] = exp(logS_MCmax_vm[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_vm[j] = exp(logS_MC_vm[j]);
+					S_MCmin_CF_vm[j] = exp(logS_MCmin_vm[j]);
+					S_MCmax_CF_vm[j] = exp(logS_MCmax_vm[j]);
+				}
+			}
+			else if (isStrikePriceQuote == 0){
+				for (int j = 0; j < StockSize; j++){
+					S_MC_CF_Sp[j] = exp(logS_MC_Sp[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_Sp[j] = exp(logS_MCmin_Sp[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_Sp[j] = exp(logS_MCmax_Sp[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_Sm[j] = exp(logS_MC_Sm[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_Sm[j] = exp(logS_MCmin_Sm[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_Sm[j] = exp(logS_MCmax_Sm[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_vp[j] = exp(logS_MC_vp[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_vp[j] = exp(logS_MCmin_vp[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_vp[j] = exp(logS_MCmax_vp[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_vm[j] = exp(logS_MC_vm[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_vm[j] = exp(logS_MCmin_vm[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_vm[j] = exp(logS_MCmax_vm[j])/BasePrice[j] * 100.0f;
+				}
 			}
 		}
 
 		if (SimMode > 1){
-			for (int j = 0; j < StockSize; j++){
-				S_MC_CF_rp[j] = exp(logS_MC_rp[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_rp[j] = exp(logS_MCmin_rp[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_rp[j] = exp(logS_MCmax_rp[j])/BasePrice[j] * 100.0f;
+			if (isStrikePriceQuote == 1){
+				for (int j = 0; j < StockSize; j++){
+					S_MC_CF_rp[j] = exp(logS_MC_rp[j]);
+					S_MCmin_CF_rp[j] = exp(logS_MCmin_rp[j]);
+					S_MCmax_CF_rp[j] = exp(logS_MCmax_rp[j]);
 
-				S_MC_CF_tm[j] = exp(logS_MC_tm[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_tm[j] = exp(logS_MCmin_tm[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_tm[j] = exp(logS_MCmax_tm[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_tm[j] = exp(logS_MC_tm[j]);
+					S_MCmin_CF_tm[j] = exp(logS_MCmin_tm[j]);
+					S_MCmax_CF_tm[j] = exp(logS_MCmax_tm[j]);
+				}
+			}
+			else if (isStrikePriceQuote == 0){
+				for (int j = 0; j < StockSize; j++){
+					S_MC_CF_rp[j] = exp(logS_MC_rp[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_rp[j] = exp(logS_MCmin_rp[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_rp[j] = exp(logS_MCmax_rp[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_tm[j] = exp(logS_MC_tm[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_tm[j] = exp(logS_MCmin_tm[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_tm[j] = exp(logS_MCmax_tm[j])/BasePrice[j] * 100.0f;
+				}
 			}
 		}
 
 		if (SimMode > 2){
-			for (int j = 0; j < StockSize; j++){
-				S_MC_CF_vpSp[j] = exp(logS_MC_vpSp[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_vpSp[j] = exp(logS_MCmin_vpSp[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_vpSp[j] = exp(logS_MCmax_vpSp[j])/BasePrice[j] * 100.0f;
+			if (isStrikePriceQuote == 1){
+				for (int j = 0; j < StockSize; j++){
+					S_MC_CF_vpSp[j] = exp(logS_MC_vpSp[j]);
+					S_MCmin_CF_vpSp[j] = exp(logS_MCmin_vpSp[j]);
+					S_MCmax_CF_vpSp[j] = exp(logS_MCmax_vpSp[j]);
 
-				S_MC_CF_vpSm[j] = exp(logS_MC_vpSm[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_vpSm[j] = exp(logS_MCmin_vpSm[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_vpSm[j] = exp(logS_MCmax_vpSm[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_vpSm[j] = exp(logS_MC_vpSm[j]);
+					S_MCmin_CF_vpSm[j] = exp(logS_MCmin_vpSm[j]);
+					S_MCmax_CF_vpSm[j] = exp(logS_MCmax_vpSm[j]);
 
-				S_MC_CF_vmSp[j] = exp(logS_MC_vmSp[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_vmSp[j] = exp(logS_MCmin_vmSp[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_vmSp[j] = exp(logS_MCmax_vmSp[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_vmSp[j] = exp(logS_MC_vmSp[j]);
+					S_MCmin_CF_vmSp[j] = exp(logS_MCmin_vmSp[j]);
+					S_MCmax_CF_vmSp[j] = exp(logS_MCmax_vmSp[j]);
 
-				S_MC_CF_vmSm[j] = exp(logS_MC_vmSm[j])/BasePrice[j] * 100.0f;
-				S_MCmin_CF_vmSm[j] = exp(logS_MCmin_vmSm[j])/BasePrice[j] * 100.0f;
-				S_MCmax_CF_vmSm[j] = exp(logS_MCmax_vmSm[j])/BasePrice[j] * 100.0f;
+					S_MC_CF_vmSm[j] = exp(logS_MC_vmSm[j]);
+					S_MCmin_CF_vmSm[j] = exp(logS_MCmin_vmSm[j]);
+					S_MCmax_CF_vmSm[j] = exp(logS_MCmax_vmSm[j]);
+				}
+			}
+			else if (isStrikePriceQuote == 0){
+				for (int j = 0; j < StockSize; j++){
+					S_MC_CF_vpSp[j] = exp(logS_MC_vpSp[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_vpSp[j] = exp(logS_MCmin_vpSp[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_vpSp[j] = exp(logS_MCmax_vpSp[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_vpSm[j] = exp(logS_MC_vpSm[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_vpSm[j] = exp(logS_MCmin_vpSm[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_vpSm[j] = exp(logS_MCmax_vpSm[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_vmSp[j] = exp(logS_MC_vmSp[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_vmSp[j] = exp(logS_MCmin_vmSp[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_vmSp[j] = exp(logS_MCmax_vmSp[j])/BasePrice[j] * 100.0f;
+
+					S_MC_CF_vmSm[j] = exp(logS_MC_vmSm[j])/BasePrice[j] * 100.0f;
+					S_MCmin_CF_vmSm[j] = exp(logS_MCmin_vmSm[j])/BasePrice[j] * 100.0f;
+					S_MCmax_CF_vmSm[j] = exp(logS_MCmax_vmSm[j])/BasePrice[j] * 100.0f;
+				}
 			}
 		}
 			
@@ -735,7 +797,7 @@ __global__ void MC(curandState *state,
 				}
 			}
 		}
-	}	
+	}
 
 	result[id].price = price_tmp;
 	if (SimMode > 0){
