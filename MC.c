@@ -51,7 +51,7 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(struct VBAData* Data)
 	// Vol info: fixed case, term structure, and surface
 	// Time axis size: Max 20 (just my purpose)
 	// Price axis size for vol surface: Max 13 (assumed to be fixed, just my purpose)
-	float Volt_[60] = {0}, VolK_[60] = {0}, VolFixed_[3] = {0}, VolCurve_[60] = {0}, VolSurf_[1200] = {0};
+	float Volt_[120] = {0}, VolK_[63] = {0}, VolFixed_[3] = {0}, VolCurve_[120] = {0}, VolSurf_[2520] = {0};
 	
 	// Correlation: raw matrix and Cholesky decomposed (LD)
 	// Correlation size: Max 3x3 (just my purpose)
@@ -159,18 +159,18 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(struct VBAData* Data)
 			case 1:
 				{
 					for (j = 0; j < VolSize_t_[i]; j++){
-						Volt_[20*i+j] = Data->Stock[i].Vol.Volt[j];
-						VolCurve_[20*i+j] = Data->Stock[i].Vol.Volv[20*i+j];
+						Volt_[40*i+j] = Data->Stock[i].Vol.Volt[j];
+						VolCurve_[40*i+j] = Data->Stock[i].Vol.Volv[j];
 					}
 					break;
 				}
 			case 2:
 				{
 					for (j = 0; j < VolSize_t_[i]; j++){
-						Volt_[20*i+j] = Data->Stock[i].Vol.Volt[j];
+						Volt_[40*i+j] = Data->Stock[i].Vol.Volt[j];
 						for (k = 0; k < VolSize_K_[i]; k++){
-							VolK_[20*i+k] = Data->Stock[i].Vol.VolK[k];
-							VolSurf_[400*i+20*j+k] = Data->Stock[i].Vol.Volv[VolSize_K_[i]*j+k];
+							VolK_[21*i+k] = Data->Stock[i].Vol.VolK[k];
+							VolSurf_[840*i+21*j+k] = Data->Stock[i].Vol.Volv[VolSize_K_[i]*j+k];
 						}
 					}
 					break;

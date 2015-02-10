@@ -3,7 +3,8 @@ Option Explicit
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 '  ELS MC Pricer - Excel template ver.0.2                                               '
-'       by Boram Hwang (15/01/05)                                                       '
+'       by Boram Hwang (15/02/10)                                                       '
+'											'
 '                                                                                       '
 '  Main features                                                                        '
 '   (1) Pricing arbitrary structured ELS                                                '
@@ -13,6 +14,9 @@ Option Explicit
 '       (Supported greeks: delta, gamma, vega, rho, theta, volga, vanna                 '
 '        Result types are selectable)                                                   '
 '                                                                                       '
+'  Additional features for the current version						'
+'   (1) Can handle all 3 Korean volatility surface data providers' format		'
+'											'
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 ' Hard coded features
@@ -53,9 +57,9 @@ Public Type VBAVol
     VolSizet As Long
     VolSizeK As Long
     
-    Volt(1 To 20) As Single
-    VolK(1 To 20) As Single
-    Volv(1 To 400) As Single
+    Volt(1 To 40) As Single
+    VolK(1 To 21) As Single
+    Volv(1 To 840) As Single
 End Type
 
 ' Structure: underlying
@@ -99,6 +103,7 @@ Public Type VBAData
     SimMode As Long                     ' Result coverage: 0 - Price / 1 - Delta, Gamma, Vega / 2 - Rho, Theta / 3 - Vanna, Volga
     blockN As Long                      ' Block number to use in CUDA MC
     threadN As Long                     ' Thread number to use in CUDA MC
+    isStrikePriceQuote As Long          ' Strike Quoted by price or parity (parity: 0 / price: 1)
 End Type
 
 ' Structure: getting MC results to VBA
@@ -111,53 +116,26 @@ Public Type Result
     theta As Single                     ' Theta
     vanna(1 To 3) As Single             ' Vanna by underlying
     volga(1 To 3) As Single             ' Volga by underlying
+    
+    prob(1 To 60) As Single             ' Exit Probability
 End Type
 
 ' CUDA DLL
-Public Declare Function Pricer_MC Lib "C:\Users\Administrator\Desktop\Project\ELS\Pricer_MC_v2\Release\Pricer_MC_v2.dll" _
+Public Declare Function Pricer_MC Lib "C:\Users\Administrator\Desktop\Project\C++\MC_Pricer_NICE\Release\MC_Pricer.dll" _
                                   (data As VBAData) As Result
 
+
 ' Subroutine to price an ELS
-Sub ELS_KH_Pricer()
+Sub MCPricer()
     Range("StartTime").Value = Now
     
-    Dim i As Integer, j As Integer, l As Integer, m As Integer
+    Dim i As Integer, j As Integer, l As Integer, m As Integer, n As Integer
     Dim data As VBAData
     Dim Stock0 As VBAUnderlying, Rf0 As VBARate, Div0 As VBADiv, Vol0 As VBAVol
     Dim RateType As Long, RateSize As Long
     Dim DivType As Long, DivSize As Long
     Dim VolType As Long, VolSizet As Long, VolSizeK As Long
-   
-    ' Get historic underlying records
-    i = 1
-    Do While Range("Index_KOSPI").Offset(i, 0).Value <> Range("Date").Value And Range("Index_KOSPI").Offset(i, 0).Value > 0
-        i = i + 1
-    Loop
-    Range("StockPrice")(1, 1).Value = Range("Index_KOSPI").Offset(i, 1).Value
-    Range("DivYield")(1, 1).Value = Range("Index_KOSPI").Offset(i, 2).Value
-    Range("OBMSVol")(1, 1).Value = Range("Index_KOSPI").Offset(i, 3).Value
-    
-    i = 1
-    Do While Range("Index_HSCEI").Offset(i, 0).Value <> Range("Date").Value And Range("Index_HSCEI").Offset(i, 0).Value > 0
-        i = i + 1
-    Loop
-    Range("StockPrice")(1, 2).Value = Range("Index_HSCEI").Offset(i, 1).Value
-    Range("DivYield")(1, 2).Value = Range("Index_HSCEI").Offset(i, 2).Value
-    Range("OBMSVol")(1, 2).Value = Range("Index_HSCEI").Offset(i, 3).Value
-    
-    Range("StockPrice")(1, 1).Value = Range("Index_HSCEI").Offset(i, 1).Value
-    Range("DivYield")(1, 1).Value = Range("Index_HSCEI").Offset(i, 2).Value
-    Range("OBMSVol")(1, 1).Value = Range("Index_HSCEI").Offset(i, 3).Value
-    
-    i = 1
-    Do While Range("HistCorr").Offset(i, 0).Value <> Range("Date").Value And Range("HistCorr").Offset(i, 0).Value > 0
-        i = i + 1
-    Loop
-    Range("Correlation")(1, 1).Value = 1
-    Range("Correlation")(1, 2).Value = Range("HistCorr").Offset(i, 1).Value
-    Range("Correlation")(2, 1).Value = Range("HistCorr").Offset(i, 1).Value
-    Range("Correlation")(2, 2).Value = 1
-   
+    Dim rng_name As String
    
 ''''' Underlying info section '''''
     ' Set amount of underlyings
@@ -173,43 +151,28 @@ Sub ELS_KH_Pricer()
         ElseIf Rf0.RateType = 1 Then
             Rf0.RateSize = 0
             
-            ' KRW Curve: KRW IRS
+            ' KRW Curve: KRW IRS / HKD Curve: HKD IRS
             If Range("StockCurncy")(1, i).Value = "KRW" Then
-                j = 1
-                Do While Range("RateCurve_KRW").Offset(0, j).Value > 0
-                    Rf0.Ratet(j) = Range("RateCurve_KRW").Offset(0, j).Value / 360#
-                    Rf0.RateSize = Rf0.RateSize + 1
-                    j = j + 1
-                Loop
-                
-                j = 1
-                Do While Range("RateCurve_KRW").Offset(j, 0).Value < Range("Date").Value
-                    j = j + 1
-                Loop
-                
-                For l = 1 To Rf0.RateSize
-                    Rf0.Rater(l) = Range("RateCurve_KRW").Offset(j, l).Value
-                Next l
-                
-            ' HKD Curve: HKD IRS
+                rng_name = "RateCurve_KRW"
             ElseIf Range("StockCurncy")(1, i).Value = "HKD" Then
-                j = 1
-                Do While Range("RateCurve_HKD").Offset(0, j).Value > 0
-                    Rf0.Ratet(j) = Range("RateCurve_HKD").Offset(0, j).Value / 360#
-                    Rf0.RateSize = Rf0.RateSize + 1
-                    j = j + 1
-                Loop
-                
-                j = 1
-                Do While Range("RateCurve_HKD").Offset(j, 0).Value < Range("Date").Value
-                    j = j + 1
-                Loop
-                
-                For l = 1 To Rf0.RateSize
-                    Rf0.Rater(l) = Range("RateCurve_HKD").Offset(j, l).Value
-                Next l
+                rng_name = "RateCurve_HKD"
             End If
-
+            
+            j = 1
+            Do While Range(rng_name).Offset(0, j).Value > 0
+                Rf0.Ratet(j) = Range(rng_name).Offset(0, j).Value / 360#
+                Rf0.RateSize = Rf0.RateSize + 1
+                j = j + 1
+            Loop
+            
+            j = 1
+            Do While Range(rng_name).Offset(j, 0).Value < Range("Date").Value
+                j = j + 1
+            Loop
+            
+            For l = 1 To Rf0.RateSize
+                Rf0.Rater(l) = Range(rng_name).Offset(j, l).Value
+            Next l
         End If
             
         ' Set dividend
@@ -241,62 +204,57 @@ Sub ELS_KH_Pricer()
         ' Surface case
         ElseIf Vol0.VolType = 2 Then
             If Range("Underlying")(1, i).Value = "KOSPI200" Then
-                j = 0
-                Do While Range("LVKOSPI").Offset(j, 0).Value < Range("Date").Value
-                    j = j + 10
-                Loop
-                If Range("LVKOSPI").Offset(j, 0).Value > Range("Date").Value Then
-                    j = j - 10
-                End If
-                
-                ' Set strike axis size (Hardcoded!)
-                Vol0.VolSizeK = 17
-                For l = 1 To Vol0.VolSizeK
-                    Vol0.VolK(l) = Range("LVKOSPI").Offset(j, l).Value * Range("StockPrice")(1, i)
-                Next l
-                
-                ' Set time axis size (Hardcoded!)
-                Vol0.VolSizet = 9
-                For l = 1 To Vol0.VolSizet
-                    Vol0.Volt(l) = Range("LVKOSPI").Offset(j + l, 0).Value / 360#
-                Next l
-                
-                ' Arrange local volatility
-                For l = 1 To Vol0.VolSizet
-                    For m = 1 To Vol0.VolSizeK
-                        Vol0.Volv((l - 1) * Vol0.VolSizeK + m) = Range("LVKOSPI").Offset(j + l, m).Value
-                    Next m
-                Next l
-                
+                rng_name = "LVKOSPI"
             ElseIf Range("Underlying")(1, i).Value = "HSCEI" Then
-                j = 0
-                Do While Range("LVHSCEI").Offset(j, 0).Value < Range("Date").Value
-                    j = j + 10
-                Loop
-                If Range("LVHSCEI").Offset(j, 0).Value > Range("Date").Value Then
-                    j = j - 10
-                End If
-                
-                ' Set strike axis size (Hardcoded!)
-                Vol0.VolSizeK = 17
-                For l = 1 To Vol0.VolSizeK
-                    Vol0.VolK(l) = Range("LVHSCEI").Offset(j, l).Value * Range("StockPrice")(1, i)
-                Next l
-                
-                ' Set time axis size (Hardcoded!)
-                Vol0.VolSizet = 9
-                For l = 1 To Vol0.VolSizet
-                    Vol0.Volt(l) = Range("LVHSCEI").Offset(j + l, 0).Value / 360#
-                Next l
-                
-                ' Arrange local volatility
-                For l = 1 To Vol0.VolSizet
-                    For m = 1 To Vol0.VolSizeK
-                        Vol0.Volv((l - 1) * Vol0.VolSizeK + m) = Range("LVHSCEI").Offset(j + l, m).Value
-                    Next m
-                Next l
+                rng_name = "LVHSCEI"
             End If
-                
+            
+            j = 0
+            Do While Range(rng_name).Offset(j, 0).Value < Range("Date").Value
+                j = j + 12
+                'j = j + 10 KAP
+                'j = j + 12 KIS
+                'j = j + 42 NICE
+            Loop
+            If Range(rng_name).Offset(j, 0).Value > Range("Date").Value Then
+                j = j - 12
+                'j = j - 10 KAP
+                'j = j - 12 KIS
+                'j = j - 42 NICE
+            End If
+            
+            ' Set strike axis size (Hardcoded!)
+            Vol0.VolSizeK = 17
+            'Vol0.VolSizeK = 17 KAP
+            'Vol0.VolSizeK = 17 KIS
+            'Vol0.VolSizeK = 21 NICE
+            For l = 1 To Vol0.VolSizeK
+                Vol0.VolK(l) = Range(rng_name).Offset(j, l).Value * Range("StockPrice")(1, i)
+            Next l
+            
+            ' Set time axis size (Hardcoded!)
+            Vol0.VolSizet = 10
+            'Vol0.VolSizet = 9 KAP
+            'Vol0.VolSizet = 10 KIS
+            'Vol0.VolSizet = 40 NICE
+            m = 1
+            For l = 1 To Vol0.VolSizet
+                If Range(rng_name).Offset(j + l, 0).Value > 7 Then
+                    Vol0.Volt(m) = Range(rng_name).Offset(j + l, 0).Value / 360#
+                    m = m + 1
+                End If
+            Next l
+            
+            n = 1
+            ' Arrange local volatility
+            For l = 1 To Vol0.VolSizet
+                If Range(rng_name).Offset(j + l, 0).Value > 7 Then
+                    For m = 1 To Vol0.VolSizeK
+                        Vol0.Volv((n - 1) * Vol0.VolSizeK + m) = Range(rng_name).Offset(j + l, m).Value
+                    Next m
+                    n = n + 1
+                End If
+            Next l
         End If
         
         ' Input underlying info
@@ -382,7 +340,7 @@ Sub ELS_KH_Pricer()
             payoff0.Dummy = Range("Dummy")(i, 1).Value
             
             ' Participation rate (hardcorded)
-            payoff0.Participation = 1
+            payoff0.Participation = Range("Participation")(i, 1).Value / 100
                     
             data.ScheduleSize = data.ScheduleSize + 1
             data.Schedule(data.ScheduleSize) = payoff0
@@ -421,24 +379,34 @@ Sub ELS_KH_Pricer()
     data.SimMode = Range("SimMode").Value
     data.blockN = 4
     data.threadN = 160
+    data.isStrikePriceQuote = Range("StrikeQuote").Value
     Dim MCResult As Result
     MCResult = Pricer_MC(data)
     
     ' Arrange results
     With Range("Result")
+        .Offset(0, 0) = "Price"
         .Offset(0, 1) = MCResult.price
+        .Offset(4 * data.StockSize + 1, 0) = "Theta"
         .Offset(4 * data.StockSize + 1, 1) = MCResult.theta
         For i = 1 To data.StockSize
+        .Offset(i, 0) = "Delta" & i
         .Offset(i, 1) = MCResult.delta(i) * 0.01 * data.Stock(i).S
+        .Offset(data.StockSize + i, 0) = "Gamma" & i
         .Offset(data.StockSize + i, 1) = MCResult.gamma(i) * 0.01 * data.Stock(i).S * 0.01 * data.Stock(i).S
+        .Offset(2 * data.StockSize + i, 0) = "Vega" & i
         .Offset(2 * data.StockSize + i, 1) = MCResult.vega(i)
+        .Offset(3 * data.StockSize + i, 0) = "Rho" & i
         .Offset(3 * data.StockSize + i, 1) = MCResult.rho(i) * 0.001
+        .Offset(4 * data.StockSize + 1 + i, 0) = "Vanna" & i
         .Offset(4 * data.StockSize + 1 + i, 1) = MCResult.vanna(i) * 0.01 * data.Stock(i).S
+        .Offset(5 * data.StockSize + 1 + i, 0) = "Volga" & i
         .Offset(5 * data.StockSize + 1 + i, 1) = MCResult.volga(i)
         Next i
     End With
 
     Range("EndTime").Value = Now
+    Range("ElapsedTime").Value = DateDiff("s", Range("StartTime").Value, Range("EndTime").Value)
     
 End Sub
 
@@ -501,6 +469,8 @@ Function PayoffType(typestr As String) As Long
 
     PayoffType = typenum
 End Function
+
+
 
 
 

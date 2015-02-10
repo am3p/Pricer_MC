@@ -21,9 +21,9 @@ struct VBAVol{
     int VolSizet;
     int VolSizeK;
     
-    float Volt[20];
-    float VolK[20];
-    float Volv[400];
+    float Volt[40];
+    float VolK[21];
+    float Volv[840];
 };
 
 struct VBAYTM{

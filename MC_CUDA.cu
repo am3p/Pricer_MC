@@ -31,11 +31,11 @@ __constant__ float DivFixed[3];
 __constant__ float DivCurve[60];
 
 // Vol: t size 20, K size 13 per each asset
-__constant__ float Volt[60];
-__constant__ float VolK[60];
+__constant__ float Volt[120];
+__constant__ float VolK[63];
 __constant__ float VolFixed[3];
-__constant__ float VolCurve[60];
-__constant__ float VolSurf[1200];
+__constant__ float VolCurve[120];
+__constant__ float VolSurf[2520];
 
 // Correlation
 __constant__ float correl[9];
@@ -187,19 +187,19 @@ void CalcMC(int StockSize_, float* StockPrice_, float* BasePrice_,
 	// Global variable: Volatility
 	float* Volt_ptr;
 	cudaGetSymbolAddress((void**) &Volt_ptr, Volt);
-	cudaMemcpy(Volt_ptr, Volt_, 60 * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(Volt_ptr, Volt_, 120 * sizeof(float), cudaMemcpyHostToDevice);
 	float* VolK_ptr;
 	cudaGetSymbolAddress((void**) &VolK_ptr, VolK);
-	cudaMemcpy(VolK_ptr, VolK_, 60 * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(VolK_ptr, VolK_, 63 * sizeof(float), cudaMemcpyHostToDevice);
 	float* VolFixed_ptr;
 	cudaGetSymbolAddress((void**) &VolFixed_ptr, VolFixed);
 	cudaMemcpy(VolFixed_ptr, VolFixed_, 3 * sizeof(float), cudaMemcpyHostToDevice);
 	float* VolCurve_ptr;
 	cudaGetSymbolAddress((void**) &VolCurve_ptr, VolCurve);
-	cudaMemcpy(VolCurve_ptr, VolCurve_, 60 * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(VolCurve_ptr, VolCurve_, 120 * sizeof(float), cudaMemcpyHostToDevice);
 	float* VolSurf_ptr;
 	cudaGetSymbolAddress((void**) &VolSurf_ptr, VolSurf);
-	cudaMemcpy(VolSurf_ptr, VolSurf_, 1200 * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(VolSurf_ptr, VolSurf_, 2520 * sizeof(float), cudaMemcpyHostToDevice);
 
 	// Global variable: correlation
 	float* correl_ptr;
@@ -909,71 +909,71 @@ __device__ float VolInterp(float t, float K, int* tind, int* Kind, int stocknum)
 		if (t > Volt[20*stocknum + (tind[stocknum])] && tind[stocknum] < Stock[stocknum].VolSizet)
 			(tind[stocknum])++;
 		// nearest extrapolation
-		if ((tind[stocknum]) == 0)								Vol = VolCurve[20*stocknum + 0];
-		else if ((tind[stocknum]) == Stock[stocknum].VolSizet)	Vol = VolCurve[20*stocknum + Stock[stocknum].VolSizet-1];
+		if ((tind[stocknum]) == 0)								Vol = VolCurve[40*stocknum + 0];
+		else if ((tind[stocknum]) == Stock[stocknum].VolSizet)	Vol = VolCurve[40*stocknum + Stock[stocknum].VolSizet-1];
 		else{
 			// linear interpolation
-			Vol = VolCurve[20*stocknum + (tind[stocknum])-1] + 
-				  (VolCurve[20*stocknum + (tind[stocknum])] - VolCurve[20*stocknum + (tind[stocknum])-1])/(Volt[20*stocknum + (tind[stocknum])] - Volt[20*stocknum + (tind[stocknum])-1]) *
-				  (t-Volt[20*stocknum + (tind[stocknum])-1]);
+			Vol = VolCurve[40*stocknum + (tind[stocknum])-1] + 
+				  (VolCurve[40*stocknum + (tind[stocknum])] - VolCurve[40*stocknum + (tind[stocknum])-1])/(Volt[40*stocknum + (tind[stocknum])] - Volt[40*stocknum + (tind[stocknum])-1]) *
+				  (t-Volt[40*stocknum + (tind[stocknum])-1]);
 		}
 	}
 
 	// Surface case
 	else if (Stock[stocknum].VolType == 2){
-		if (t > Volt[20*stocknum + (tind[stocknum])] && tind[stocknum] < Stock[stocknum].VolSizet)
+		if (t > Volt[40*stocknum + (tind[stocknum])] && tind[stocknum] < Stock[stocknum].VolSizet)
 			(tind[stocknum])++;
 
-		if (K < VolK[20*stocknum + (Kind[stocknum])]){
-			while (K < VolK[20*stocknum + (Kind[stocknum])]){
-				if (Kind[stocknum] == 0)	break;
+		if (K < VolK[21*stocknum + (Kind[stocknum])]){
+			while (K < VolK[21*stocknum + (Kind[stocknum])] && Kind[stocknum] > 0){
 				(Kind[stocknum])--;
+				if (Kind[stocknum] == 0)	break;
 			}
 		}
-		else if (K > VolK[20*stocknum + (Kind[stocknum])+1]){
-			while (K > VolK[20*stocknum + (Kind[stocknum])+1]){
-				if (Kind[stocknum] == Stock[stocknum].VolSizeK)	break;
+		else if (K > VolK[21*stocknum + (Kind[stocknum])+1]){
+			while (K > VolK[21*stocknum + (Kind[stocknum])+1] && Kind[stocknum] < Stock[stocknum].VolSizeK){
 				(Kind[stocknum])++;
+				if (Kind[stocknum] == Stock[stocknum].VolSizeK)	break;
 			}
 		}
 
 		if ((tind[stocknum]) == 0){
-			if ((Kind[stocknum]) == 0)								Vol = VolSurf[400*stocknum + 0];
-			else if ((Kind[stocknum]) == Stock[stocknum].VolSizeK)	Vol = VolSurf[400*stocknum + Stock[stocknum].VolSizeK - 1];
+			if ((Kind[stocknum]) == 0)								Vol = VolSurf[840*stocknum + 0];
+			else if ((Kind[stocknum]) == Stock[stocknum].VolSizeK)	Vol = VolSurf[840*stocknum + Stock[stocknum].VolSizeK - 1];
 			else{
-				Vol = VolSurf[400*stocknum + (Kind[stocknum])-1] + 
-					  (VolSurf[400*stocknum + (Kind[stocknum])] - VolSurf[400*stocknum + (Kind[stocknum])-1])/(VolK[20*stocknum + (Kind[stocknum])] - VolK[20*stocknum + (Kind[stocknum])-1]) *
-					  (K-VolK[20*stocknum + (Kind[stocknum])-1]);
+				Vol = VolSurf[840*stocknum + (Kind[stocknum])-1] + 
+					  (VolSurf[840*stocknum + (Kind[stocknum])] - VolSurf[840*stocknum + (Kind[stocknum])-1])/(VolK[21*stocknum + (Kind[stocknum])] - VolK[21*stocknum + (Kind[stocknum])-1]) *
+					  (K-VolK[21*stocknum + (Kind[stocknum])-1]);
 			}
 		}
 		else if ((tind[stocknum]) == Stock[stocknum].VolSizet){
-			if ((Kind[stocknum]) == 0)								Vol = VolSurf[400*stocknum + 20*(Stock[stocknum].VolSizet-1)];
-			else if ((Kind[stocknum]) == Stock[stocknum].VolSizeK)	Vol = VolSurf[400*stocknum + 20*Stock[stocknum].VolSizet - 1];
+			if ((Kind[stocknum]) == 0)								Vol = VolSurf[840*stocknum + 21*(Stock[stocknum].VolSizet-1)];
+			else if ((Kind[stocknum]) == Stock[stocknum].VolSizeK)	Vol = VolSurf[840*stocknum + 21*(Stock[stocknum].VolSizet-1)+Stock[stocknum].VolSizeK - 1];
 			else{
-				Vol = VolSurf[400*stocknum + (20*(Stock[stocknum].VolSizet-1)) + (Kind[stocknum])-1] + 
-					  (VolSurf[400*stocknum + (20*(Stock[stocknum].VolSizet-1)) + (Kind[stocknum])] - VolSurf[400*stocknum + (20*(Stock[stocknum].VolSizet-1)) + (Kind[stocknum])-1])/(VolK[20*stocknum + Kind[stocknum]] - VolK[20*stocknum + Kind[stocknum]-1]) *
-					  (K-VolK[20*stocknum + (Kind[stocknum])-1]);
+				Vol = VolSurf[840*stocknum + (21*(Stock[stocknum].VolSizet-1)) + (Kind[stocknum])-1] + 
+					  (VolSurf[840*stocknum + (21*(Stock[stocknum].VolSizet-1)) + (Kind[stocknum])] - VolSurf[840*stocknum + (21*(Stock[stocknum].VolSizet-1)) + (Kind[stocknum])-1])/(VolK[21*stocknum + Kind[stocknum]] - VolK[21*stocknum + Kind[stocknum]-1]) *
+					  (K-VolK[21*stocknum + (Kind[stocknum])-1]);
 			}
 		}
 		else{
 			if ((Kind[stocknum]) == 0){
-				Vol1 = VolSurf[400*stocknum + 20*((tind[stocknum])-1)];
-				Vol2 = VolSurf[400*stocknum + 20*(tind[stocknum])];
-				Vol = Vol1 + (Vol2-Vol1)/(Volt[20*stocknum + (tind[stocknum])] - Volt[20*stocknum + (tind[stocknum])-1]) * (t-Volt[20*stocknum + (tind[stocknum])-1]);
+				Vol1 = VolSurf[840*stocknum + 21*(tind[stocknum]-1)];
+				Vol2 = VolSurf[840*stocknum + 21*(tind[stocknum])];
+				Vol = Vol1 + (Vol2-Vol1)/(Volt[40*stocknum + (tind[stocknum])] - Volt[40*stocknum + (tind[stocknum])-1]) * (t-Volt[40*stocknum + (tind[stocknum])-1]);
 			}
 			else if ((Kind[stocknum]) == Stock[stocknum].VolSizeK){
-				Vol1 = VolSurf[400*stocknum + 20*(tind[stocknum])-1];
-				Vol2 = VolSurf[400*stocknum + 20*((tind[stocknum])+1)-1];
-				Vol = Vol1 + (Vol2-Vol1)/(Volt[20*stocknum + (tind[stocknum])] - Volt[20*stocknum + (tind[stocknum])-1]) * (t-Volt[20*stocknum + (tind[stocknum])-1]);
+				Vol1 = VolSurf[840*stocknum + 21*(tind[stocknum]-1)+Stock[stocknum].VolSizeK-1];
+				Vol2 = VolSurf[840*stocknum + 21*(tind[stocknum])+Stock[stocknum].VolSizeK-1];
+				Vol = Vol1 + (Vol2-Vol1)/(Volt[40*stocknum + (tind[stocknum])] - Volt[40*stocknum + (tind[stocknum])-1]) * (t-Volt[40*stocknum + (tind[stocknum])-1]);
 			}
 			else{
-				Vol11 = VolSurf[400*stocknum + 20*((tind[stocknum])-1) + (Kind[stocknum])-1];
-				Vol12 = VolSurf[400*stocknum + 20*((tind[stocknum])-1) + (Kind[stocknum])];
-				Vol21 = VolSurf[400*stocknum + 20*((tind[stocknum])) + (Kind[stocknum])-1];
-				Vol22 = VolSurf[400*stocknum + 20*((tind[stocknum])) + (Kind[stocknum])];
-				Vol1 = Vol11 + (Vol12-Vol11)/(VolK[20*stocknum + (Kind[stocknum])] - VolK[20*stocknum + (Kind[stocknum])-1]) * (K-VolK[20*stocknum + (Kind[stocknum])-1]);
-				Vol2 = Vol21 + (Vol22-Vol21)/(VolK[20*stocknum + (Kind[stocknum])] - VolK[20*stocknum + (Kind[stocknum])-1]) * (K-VolK[20*stocknum + (Kind[stocknum])-1]);
-				Vol = Vol1 + (Vol2-Vol1)/(Volt[20*stocknum + (tind[stocknum])] - Volt[20*stocknum + (tind[stocknum])-1]) * (t-Volt[20*stocknum + (tind[stocknum])-1]);
+				Vol11 = VolSurf[840*stocknum + 21*((tind[stocknum])-1) + (Kind[stocknum])-1];
+				Vol12 = VolSurf[840*stocknum + 21*((tind[stocknum])-1) + (Kind[stocknum])];
+				Vol21 = VolSurf[840*stocknum + 21*((tind[stocknum])) + (Kind[stocknum])-1];
+				Vol22 = VolSurf[840*stocknum + 21*((tind[stocknum])) + (Kind[stocknum])];
+				Vol1 = Vol11 + (Vol12-Vol11)/(VolK[21*stocknum + (Kind[stocknum])] - VolK[21*stocknum + (Kind[stocknum])-1]) * (K-VolK[21*stocknum + (Kind[stocknum])-1]);
+				Vol2 = Vol21 + (Vol22-Vol21)/(VolK[21*stocknum + (Kind[stocknum])] - VolK[21*stocknum + (Kind[stocknum])-1]) * (K-VolK[21*stocknum + (Kind[stocknum])-1]);
+				Vol = Vol1 + (Vol2-Vol1)/(Volt[40*stocknum + (tind[stocknum])] - Volt[40*stocknum + (tind[stocknum])-1]) * (t-Volt[40*stocknum + (tind[stocknum])-1]);
 			}
 		}
 
@@ -1077,24 +1077,24 @@ __device__ float PayoffCalc(float S[][3], float* S_min, float* S_max, int StockS
 							else															result = SMin(S, StockSize, casenum);
 							break;
 						}
-					// KO CALL
+					// KO CALL (coupon acts as a principal value)
 					case 4:
 						{
 							float PayoffPrice = RefPriceCalc(S, StockSize, sched_ind, casenum);
 							if (PayoffPrice > Schedule[sched_ind].K && PayoffPrice < Schedule[sched_ind].UpBarrier)
-								result = Schedule[sched_ind].Participation * (PayoffPrice - Schedule[sched_ind].K);
+								result = Schedule[sched_ind].Participation * (PayoffPrice - Schedule[sched_ind].K) + Schedule[sched_ind].Coupon;
 							else
-								result = 0;
+								result = Schedule[sched_ind].Coupon;
 							break;
 						}
-					// KO PUT
+					// KO PUT (coupon acts as a principal value)
 					case 6:
 						{
 							float PayoffPrice = RefPriceCalc(S, StockSize, sched_ind, casenum);
 							if (PayoffPrice < Schedule[sched_ind].K && PayoffPrice > Schedule[sched_ind].DownBarrier)
-								result = Schedule[sched_ind].Participation * (Schedule[sched_ind].K - PayoffPrice);
+								result = Schedule[sched_ind].Participation * (Schedule[sched_ind].K - PayoffPrice) + Schedule[sched_ind].Coupon;
 							else
-								result = 0;
+								result = Schedule[sched_ind].Coupon;
 							break;
 						}
 					default:
