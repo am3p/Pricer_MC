@@ -11,7 +11,7 @@
 //     (Each sample is constructed per a GPU so that by upgrading VGA with more SM
 //		will reduce calculation time)
 //  3. Adapting constant, term-structured, or surface parameters
-//	   (Interpolation/Extrapolation of parameters can be done linearly only, in this
+//	   (longerpolation/Extrapolation of parameters can be done linearly only, in this
 //		version)
 //
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -22,75 +22,79 @@
 
 #include "MCwrapper_fcn.h"
 #include "MCstruct_VBA.h"
+#include "VariableSize.h"
 
-__declspec(dllexport) struct VBAResult __stdcall Pricer_MC(struct VBAData* Data){
+__declspec(dllexport) struct VBAResult __stdcall Pricer_MC(long NStock, double* StockPrice, double* BasePrice,
+														   long* RateType, long* RateTNum, double* RateT, double* Rate,
+														   long* DivType, long* DivTNum, double* DivT, double* Div,
+														   long* VolType, long* VolTNum, long* VolKNum, double* VolT, double* VolK, double* Vol,
+														   long* FXVolType, long* FXVolTNum, double* FXVolT, double* FXVol,
+														   double* StockCorr,  double* FXCorr,
+														   long NSchedule, long* T_exp, long* T_pay, long* BermudanType, long* PayoffType, long* RefPriceType,
+														   double* Strike, double* UpBarrier, double* DownBarrier, double* Coupon, double* Dummy, double* Participation,
+														   double TotalUpBarrier, double TotalDownBarrier,
+														   long Mode, long SimN, long blockN, long threadN, long isStrikePriceQuote){
 
-	int i, j, k; float s;
+	long i, j, k; double s;
 
-	// Stock size: Max 3 (just my purpose)
-	int StockSize_ = Data->StockSize;
 	// Stock: Current stock prices
-	float StockPrice_[3] = {0};
+	double StockPrice_[StockSizeMax] = {0};
 	// Stock: Base prices for the product
-	float BasePrice_[3] = {0};
+	double BasePrice_[StockSizeMax] = {0};
+
 	
-	// Rate info: type and size (type: 0 - Fixed / 1 - Term)
-	int RateType_[3] = {0}, RateSize_[3] = {0};
-	// Rate info: fixed case and term structure
-	// Time axis size: Max 20 (just my purpose)
-	float Ratet_[60] = {0}, RateFixed_[3] = {0}, RateCurve_[60] = {0};
-
-	// Div info: type and size (type: 0 - Fixed / 1 - Term)
-	int DivType_[3] = {0}, DivSize_[3] = {0};
-	// Div info: fixed case and term structure
-	// Time axis size: Max 20 (just my purpose)
-	float Divt_[60] = {0}, DivFixed_[3] = {0}, DivCurve_[60] = {0};
-
-	// Vol info: type and size (type: 0 - Fixed / 1 - Term / 2 - Surface)
-	int VolType_[3] = {0}, VolSize_t_[3] = {0}, VolSize_K_[3] = {0};
-	// Vol info: fixed case, term structure, and surface
-	// Time axis size: Max 20 (just my purpose)
-	// Price axis size for vol surface: Max 13 (assumed to be fixed, just my purpose)
-	float Volt_[120] = {0}, VolK_[63] = {0}, VolFixed_[3] = {0}, VolCurve_[120] = {0}, VolSurf_[2520] = {0};
-	
-	// Correlation: raw matrix and Cholesky decomposed (LD)
-	// Correlation size: Max 3x3 (just my purpose)
-	float correl_raw[9] = {0}, correl_[9] = {0};
-
-	// Quanto adjustment
-	float Quanto_[3] = {0};
-	
-	// Schedule size: Max 60 (just my purpose)
-	int ScheduleSize_ = Data->ScheduleSize;
-	// Schedule info: TTM
-	int PayoffT_[60] = {0}, PayoffT_pay[60] = {0};
-	// Schedule info: Types (Bermudan / Payoff type / Reference price type)
-	int BermudanType_[60] = {0}, PayoffType_[60] = {0}, RefPriceType_[60] = {0};
-	// Schedule info: Exercise and barrier
-	float PayoffK_[60] = {0}, UpBarrier_[60] = {0}, DownBarrier_[60] = {0}, TotalUpBarrier_[60] = {0}, TotalDownBarrier_[60] = {0};
-	// Schedule info: Payout coupon, dummy
-	float Coupon_[60] = {0}, Dummy_[60] = {0};
-	// Schedule info: Participation rate
-	float Participation_[60] = {0};
-
-	// YTM info: type and size
-	int YTMType_, YTMSize_;
 	// YTM rate: fixed case and term structure
 	// Time axis size: Max 20 (just my purpose)
-	float YTMt_[20] = {0}, YTMFixed_, YTMCurve_[20] = {0};
+	long YTMType_ = 0, YTMSize_ = 0;
+	double YTMt_[RateTMax] = {0}, YTM_[RateTMax] = {0};
+	long YTMInd_src = 0, YTMInd_dest = 0;
+	
+	// Rate info: type and size (type: 0 - Fixed / 1 - Term)
+	long RateType_[StockSizeMax] = {0}, RateSize_[StockSizeMax] = {0};
+	// Rate info: fixed case and term structure
+	// Time axis size: Max 20 (just my purpose)
+	double Ratet_[StockSizeMax * RateTMax] = {0}, Rate_[StockSizeMax * RateTMax] = {0};
+	long RateInd_src = 0, RateInd_dest = 0;
 
-	int isStrikePriceQuote_ = Data->isStrikePriceQuote;
-	int SimN_ = Data->SimN;
-	int SimMode_ = Data->SimMode;
-	int blockN_ = Data->blockN;
-	int threadN_ = Data->threadN;
+	// Div info: type and size (type: 0 - Fixed / 1 - Term)
+	long DivType_[StockSizeMax] = {0}, DivSize_[StockSizeMax] = {0};
+	// Div info: fixed case and term structure
+	// Time axis size: Max 20 (just my purpose)
+	double Divt_[StockSizeMax * DivTMax] = {0}, Div_[StockSizeMax * DivTMax] = {0};
+	long DivInd_src = 0, DivInd_dest = 0;
+
+	// Vol info: type and size (type: 0 - Fixed / 1 - Term / 2 - Surface)
+	long VolType_[StockSizeMax] = {0}, VolSize_t_[StockSizeMax] = {0}, VolSize_K_[StockSizeMax] = {0};
+	// Vol info: fixed case, term structure, and surface
+	// Time axis size: Max 40 (Covering NICE Full data)
+	// Price axis size for vol surface: Max 21 (Covering NICE Full data)
+	double Volt_[StockSizeMax * VolTMax] = {0}, VolK_[StockSizeMax * VolKMax] = {0}, Vol_[StockSizeMax * VolTMax * VolKMax] = {0};
+	long VolTInd_src = 0, VolTInd_dest = 0, VolKInd_src = 0, VolKInd_dest = 0, VolInd_src = 0, VolInd_dest = 0;
+
+	// Correlation: Cholesky decomposed (LD), Max 4x4 (just my purpose)
+	double StockCorr_LD[StockSizeMax * StockSizeMax] = {0};
+
+	// Quanto adjustment
+	double QuantoAdj[StockSizeMax] = {0};
+	long QuantoInd_src = 0, QuantoInd_dest = 0;
+
+	// Schedule info: TTM
+	long PayoffT_[ScheduleSizeMax] = {0}, PayoffT_pay[ScheduleSizeMax] = {0};
+	// Schedule info: Types (Bermudan / Payoff type / Reference price type)
+	long BermudanType_[ScheduleSizeMax] = {0}, PayoffType_[ScheduleSizeMax] = {0}, RefPriceType_[ScheduleSizeMax] = {0};
+	// Schedule info: Exercise and barrier
+	double PayoffK_[ScheduleSizeMax] = {0}, UpBarrier_[ScheduleSizeMax] = {0}, DownBarrier_[ScheduleSizeMax] = {0};
+	// Schedule info: Payout coupon, dummy
+	double Coupon_[ScheduleSizeMax] = {0}, Dummy_[ScheduleSizeMax] = {0};
+	// Schedule info: Participation rate
+	double Participation_[ScheduleSizeMax] = {0};
 
 	// Result format
 	struct VBAResult* result = (struct VBAResult *) malloc(sizeof(struct VBAResult));
 	struct VBAResult result_VBA;
 	result->price = 0;
 	result->theta = 0;
-	for (i = 0; i < StockSize_; i++){
+	for (i = 0; i < NStock; i++){
 		result->delta[i] = 0;
 		result->gamma[i] = 0;
 		result->vega[i] = 0;
@@ -98,188 +102,232 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(struct VBAData* Data)
 		result->vanna[i] = 0;
 		result->volga[i] = 0;
 	}
-	for (i = 0; i < 60; i++){
+	for (i = 0; i < 100; i++){
 		result->prob[i] = 0;
 	}
 
 	// Copying product info for CUDA function
-	for (i = 0; i < StockSize_; i++){
+	for (i = 0; i < NStock; i++){
 		// Current stock price (normalized by base price)
-		StockPrice_[i] = Data->Stock[i].S;
-		BasePrice_[i] = Data->BasePrice[i];
-		
-		// Rate info
-		RateType_[i] = Data->Stock[i].Rf.RateType; RateSize_[i] = Data->Stock[i].Rf.RateSize;
-		switch(RateType_[i]){
-			case 0:
-				{
-					RateFixed_[i] = Data->Stock[i].Rf.Rater[0];
-					break;
-				}
-			case 1:
-				{
-					for (j = 0; j < RateSize_[i]; j++){
-						Ratet_[20*i+j] = Data->Stock[i].Rf.Ratet[j];
-						RateCurve_[20*i+j] = Data->Stock[i].Rf.Rater[j];
-					}
-					break;
-				}
-			default:
-				break;
-		}
-
-		// Dividend info
-		DivType_[i] = Data->Stock[i].Div.DivType; DivSize_[i] = Data->Stock[i].Div.DivSize;
-		switch(DivType_[i]){
-			case 0:
-				{
-					DivFixed_[i] = Data->Stock[i].Div.Divq[0];
-					break;
-				}
-			case 1:
-				{
-					for (j = 0; j < DivSize_[i]; j++){
-						Divt_[20*i+j] = Data->Stock[i].Div.Divt[j];
-						DivCurve_[20*i+j] = Data->Stock[i].Div.Divq[j];
-					}
-					break;
-				}
-			default:
-				break;
-		}
-
-		// Vol info
-		VolType_[i] = Data->Stock[i].Vol.VolType; VolSize_t_[i] = Data->Stock[i].Vol.VolSizet; VolSize_K_[i] = Data->Stock[i].Vol.VolSizeK;
-		switch(VolType_[i]){
-			case 0:
-				{
-					VolFixed_[i] = Data->Stock[i].Vol.Volv[0];
-					break;
-				}
-			case 1:
-				{
-					for (j = 0; j < VolSize_t_[i]; j++){
-						Volt_[40*i+j] = Data->Stock[i].Vol.Volt[j];
-						VolCurve_[40*i+j] = Data->Stock[i].Vol.Volv[j];
-					}
-					break;
-				}
-			case 2:
-				{
-					for (j = 0; j < VolSize_t_[i]; j++){
-						Volt_[40*i+j] = Data->Stock[i].Vol.Volt[j];
-						for (k = 0; k < VolSize_K_[i]; k++){
-							VolK_[21*i+k] = Data->Stock[i].Vol.VolK[k];
-							VolSurf_[840*i+21*j+k] = Data->Stock[i].Vol.Volv[VolSize_K_[i]*j+k];
-						}
-					}
-					break;
-				}
-			default:
-				break;
-		}
-	}
-
-	// Correlation: copying raw matrix
-	for (i = 0; i < StockSize_; i++){
-		for (j = 0; j < StockSize_; j++){
-			correl_raw[i*StockSize_+j] = Data->Correl[i*StockSize_+j];
-		}
-	}
-
-	// Correlation: Cholesky decomposition (LD)
-	for (i = 0; i < StockSize_; i++){
-		for (j = 0; j < (i+1); j++) {
-			s = 0;
-			for (k = 0; k < j; k++) 
-				s += correl_[i*StockSize_+k] * correl_[j*StockSize_+k];
-			correl_[i*StockSize_+j] = (i == j) ? (float)sqrt(correl_raw[i*StockSize_+i]-s) : (1.0f/correl_[j*StockSize_+j] * (correl_raw[i*StockSize_+j]-s));
-		}
-	}	
-
-	// Correlation: copying raw matrix
-	for (i = 0; i < StockSize_; i++){
-		Quanto_[i] = Data->Quanto[i];
-	}
-
-	// Schedule info: copying relevant information
-	for (i = 0; i < ScheduleSize_; i++){
-		PayoffT_[i] = Data->Schedule[i].T;
-		PayoffT_pay[i] = Data->Schedule[i].T_pay;
-
-		BermudanType_[i] = Data->Schedule[i].BermudanType;
-		PayoffType_[i] = Data->Schedule[i].PayoffType;
-		RefPriceType_[i] = Data->Schedule[i].RefPriceType;
-
-		PayoffK_[i] = Data->Schedule[i].K;
-		UpBarrier_[i] = Data->Schedule[i].UpBarrier;
-		DownBarrier_[i] = Data->Schedule[i].DownBarrier;
-		TotalUpBarrier_[i] = Data->Schedule[i].TotalUpBarrier;
-		TotalDownBarrier_[i] = Data->Schedule[i].TotalDownBarrier;
-
-		Participation_[i] = Data->Schedule[i].Participation;
-		Coupon_[i] = Data->Schedule[i].Coupon;
-		Dummy_[i] = Data->Schedule[i].Dummy;
+		StockPrice_[i] = StockPrice[i];
+		BasePrice_[i] = BasePrice[i];
 	}
 
 	// YTM info
-	YTMType_ = Data->YTM.YTMType;
-	YTMSize_ = Data->YTM.YTMSize;
+	YTMType_ = RateType[0];
+	YTMSize_ = RateTNum[0];
 	switch(YTMType_){
 		case 0:
 			{
-				YTMFixed_ = Data->YTM.YTMr[0];
+				YTM_[YTMInd_dest] = Rate[YTMInd_src];
+				YTMInd_src++;
+				YTMInd_dest = RateTMax;
 				break;
 			}
 		case 1:
 			{
-				for (j = 0; j < YTMSize_; j++){
-					YTMt_[j] = Data->YTM.YTMt[j];
-					YTMCurve_[j] = Data->YTM.YTMr[j];
+				for (i = 0; i < YTMSize_; i++){
+					YTMt_[YTMInd_dest] = RateT[YTMInd_src];
+					YTM_[YTMInd_dest] = Rate[YTMInd_src];
+					YTMInd_src++;
+					YTMInd_dest++;
 				}
+				YTMInd_dest = RateTMax;
 				break;
 			}
 		default:
 			break;
 	}
 
+	// Risk free rate info
+	RateInd_src = YTMInd_src;
+	for (i = 0; i < NStock; i++){
+		RateType_[i] = RateType[i+1];
+		RateSize_[i] = RateTNum[i+1];
+		switch(RateType_[i]){
+			case 0:
+				{
+					Rate_[RateInd_dest] = Rate[RateInd_src];
+					RateInd_src++;
+					RateInd_dest = (i+1)*RateTMax;
+					break;
+				}
+			case 1:
+				{
+					for (j = 0; j < RateSize_[i]; j++){
+						Ratet_[RateInd_dest] = RateT[RateInd_src];
+						Rate_[RateInd_dest] = Rate[RateInd_src];
+						RateInd_src++;
+						RateInd_dest++;
+					}
+					RateInd_dest = (i+1)*RateTMax;
+					break;
+				}
+			default:
+				break;
+		}
+	}
+
+	// Dividend info
+	for (i = 0; i < NStock; i++){
+		DivType_[i] = DivType[i];
+		DivSize_[i] = DivTNum[i];
+		switch(DivType_[i]){
+			case 0:
+				{
+					Div_[DivInd_dest] = Div[DivInd_src];
+					DivInd_src++;
+					DivInd_dest = (i+1)*DivTMax;
+					break;
+				}
+			case 1:
+				{
+					for (j = 0; j < DivSize_[i]; j++){
+						Divt_[DivInd_dest] = DivT[DivInd_src];
+						Div_[DivInd_dest] = Div[DivInd_src];
+						DivInd_src++;
+						DivInd_dest++;
+					}
+					DivInd_dest = (i+1)*DivTMax;
+					break;
+				}
+			default:
+				break;
+		}
+	}
+
+	// Vol info
+	for (i = 0; i < NStock; i++){
+		VolType_[i] = VolType[i];
+		VolSize_t_[i] = VolTNum[i];
+		VolSize_K_[i] = VolKNum[i];
+		switch(VolType_[i]){
+			case 0:
+				{
+					Vol_[VolInd_dest] = Vol[VolInd_src];
+					VolInd_src++;
+					VolInd_dest = (i+1)*VolTMax*VolKMax;
+					break;
+				}
+			case 1:
+				{
+					for (j = 0; j < VolTNum[i]; j++){
+						Volt_[VolTInd_dest] = VolT[VolTInd_src];
+						Vol_[VolInd_dest] = Vol[VolInd_src];
+						VolInd_src++; VolInd_dest++;
+						VolTInd_src++; VolTInd_dest++;
+					}
+					VolTInd_dest = (i+1)*VolTMax;
+					VolInd_dest = (i+1)*VolTMax*VolKMax;
+					break;
+				}
+			case 2:
+				{
+					for (j = 0; j < VolTNum[i]; j++){
+						Volt_[VolTInd_dest] = VolT[VolTInd_src];
+						VolTInd_src++; VolTInd_dest++;
+					}
+					VolTInd_dest = (i+1)*VolTMax;
+
+					for (j = 0; j < VolKNum[i]; j++){
+						VolK_[VolKInd_dest] = VolK[VolKInd_src];
+						VolKInd_src++; VolKInd_dest++;
+					}
+					VolKInd_dest = (i+1)*VolKMax;
+
+					for (j = 0; j < VolTNum[i]; j++){
+						for (k = 0; k < VolKNum[i]; k++){
+							Vol_[VolInd_dest] = Vol[VolInd_src];
+							VolInd_src++; VolInd_dest++;
+						}
+						VolInd_dest = i*VolTMax*VolKMax + (j+1)*VolKMax;
+					}
+					VolInd_dest = (i+1)*VolTMax*VolKMax;
+					break;
+				}
+			default:
+				break;
+		}
+	}
+
+	// Correlation: Cholesky decomposition (LD)
+	for (i = 0; i < NStock; i++){
+		for (j = 0; j < (i+1); j++) {
+			s = 0;
+			for (k = 0; k < j; k++) 
+				s += StockCorr[i*NStock+k] * StockCorr[j*NStock+k];
+			StockCorr_LD[i*NStock+j] = (i == j) ? sqrt(StockCorr[i*NStock+i]-s) : (1.0/StockCorr_LD[j*NStock+j] * (StockCorr[i*NStock+j]-s));
+		}
+	}	
+
+	// Quanto adjustment factor
+	QuantoInd_src = 0; QuantoInd_dest = 0;
+	for (i = 0; i < NStock; i++){
+		if (FXVolType[i] == 0){
+			QuantoAdj[QuantoInd_dest] = FXCorr[QuantoInd_src] * FXVol[QuantoInd_src];
+			QuantoInd_src++;
+			QuantoInd_dest++;
+		}
+		else if (FXVolType[i] == 1){
+			// not yet defined
+		}
+	}
+
+	// Schedule info: copying relevant information
+	for (i = 0; i < NSchedule; i++){
+		PayoffT_[i] = T_exp[i];
+		PayoffT_pay[i] = T_pay[i];
+
+		BermudanType_[i] = BermudanType[i];
+		PayoffType_[i] = PayoffType[i];
+		RefPriceType_[i] = RefPriceType[i];
+
+		PayoffK_[i] = Strike[i];
+		UpBarrier_[i] = UpBarrier[i];
+		DownBarrier_[i] = DownBarrier[i];
+
+		Participation_[i] = Participation[i];
+		Coupon_[i] = Coupon[i];
+		Dummy_[i] = Dummy[i];
+	}
+
 	// MC function
-	CalcMC(StockSize_, StockPrice_, BasePrice_,
-		   ScheduleSize_,	
+	CalcMC(NStock, StockPrice_, BasePrice_,
+		   NSchedule,	
 		   PayoffT_, PayoffT_pay, BermudanType_, PayoffType_, RefPriceType_,
 		   PayoffK_, Coupon_, Dummy_,
-		   UpBarrier_, DownBarrier_, TotalUpBarrier_, TotalDownBarrier_,
+		   UpBarrier_, DownBarrier_, TotalUpBarrier, TotalDownBarrier,
 		   Participation_,
-		   RateType_, RateSize_, Ratet_, RateFixed_, RateCurve_,
-		   DivType_, DivSize_, Divt_, DivFixed_, DivCurve_,
-		   VolType_, VolSize_t_, VolSize_K_, Volt_, VolK_, VolFixed_, VolCurve_, VolSurf_,
-		   YTMType_, YTMSize_, YTMt_, YTMFixed_, YTMCurve_,
-		   correl_, Quanto_,
-		   isStrikePriceQuote_, SimN_, SimMode_, blockN_, threadN_,
+		   RateType_, RateSize_, Ratet_, Rate_,
+		   DivType_, DivSize_, Divt_, Div_,
+		   VolType_, VolSize_t_, VolSize_K_, Volt_, VolK_, Vol_,
+		   YTMType_, YTMSize_, YTMt_, YTM_,
+		   StockCorr_LD, QuantoAdj,
+		   isStrikePriceQuote, SimN, Mode, blockN, threadN,
 		   result);
 
 	// Arrange result
 	result_VBA.price = result->price;
-	for (i = 0; i < 60; i++){
+	for (i = 0; i < ScheduleSizeMax; i++){
 		result_VBA.prob[i] = result->prob[i];
 	}
-	if (SimMode_ > 0){
-		for (i = 0; i < StockSize_; i++)
+	if (Mode > 0){
+		for (i = 0; i < NStock; i++)
 			result_VBA.delta[i] = result->delta[i];
-		for (i = 0; i < StockSize_; i++)
+		for (i = 0; i < NStock; i++)
 			result_VBA.gamma[i] = result->gamma[i];
-		for (i = 0; i < StockSize_; i++)
+		for (i = 0; i < NStock; i++)
 			result_VBA.vega[i] = result->vega[i];
 	}
-	if (SimMode_ > 1){
-		for (i = 0; i < StockSize_; i++)
+	if (Mode > 1){
+		for (i = 0; i < NStock; i++)
 			result_VBA.rho[i] = result->rho[i];
 		result_VBA.theta = result->theta;
 	}
-	if (SimMode_ > 2){
-		for (i = 0; i < StockSize_; i++)
+	if (Mode > 2){
+		for (i = 0; i < NStock; i++)
 			result_VBA.vanna[i] = result->vanna[i];
-		for (i = 0; i < StockSize_; i++)
+		for (i = 0; i < NStock; i++)
 			result_VBA.volga[i] = result->volga[i];
 	}
 

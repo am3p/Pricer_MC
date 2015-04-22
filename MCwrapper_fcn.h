@@ -6,19 +6,19 @@ extern "C"
 #endif
 
 // MC function
-void CalcMC(int StockSize_, float* StockPrice_, float* BasePrice_,
-			int ScheduleSize_,	
-			int* PayoffT_, int* PayoffT_pay, int* BermudanType_, int* PayoffType_, int* RefPriceType_,
-			float* PayoffK_, float* Coupon_, float* Dummy_,
-			float* UpBarrier_, float* DownBarrier_, float* TotalUpBarrier_, float* TotalDownBarrier_,
-			float* Participation_,
- 			int* RateType_, int* RateSize_, float* Ratet_, float* RateFixed_, float* RateCurve_,
-			int* DivType_, int* DivSize_, float* Divt_, float* DivFixed_, float* DivCurve_,
- 			int* VolType_, int* VolSizet_, int* VolSizeK_, float* Volt_, float* VolK_, float* VolFixed_, float* VolCurve_, float* VolSurf_,
-			int YTMType_, int YTMSize_, float* YTMt_, float YTMFixed_, float* YTMCurve_,
-			float* correl_, float* Quanto_,
-			int isStrikePriceQuote_, int SimN_, int SimMode_, int blockN_, int threadN_,
-			struct VBAResult* res);
+void CalcMC(long StockSize_, double* StockPrice_, double* BasePrice_,
+			long ScheduleSize_,	
+			long* PayoffT_, long* PayoffT_pay, long* BermudanType_, long* PayoffType_, long* RefPriceType_,
+			double* PayoffK_, double* Coupon_, double* Dummy_,
+			double* UpBarrier_, double* DownBarrier_, double TotalUpBarrier_, double TotalDownBarrier_,
+			double* Participation_,
+ 			long* RateType_, long* RateSize_, double* Ratet_, double* Rate_,
+			long* DivType_, long* DivSize_, double* Divt_, double* Div_,
+ 			long* VolType_, long* VolSizet_, long* VolSizeK_, double* Volt_, double* VolK_, double* Vol_,
+			long YTMType_, long YTMSize_, double* YTMt_, double* YTM_,
+			double* correl_, double* Quanto_,
+			long isStrikePriceQuote_, long SimN_, long SimMode_, long blockN_, long threadN_,
+			struct VBAResult* result);
 
 
 #ifdef __cplusplus

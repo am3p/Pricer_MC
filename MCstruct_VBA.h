@@ -1,92 +1,82 @@
+#pragma once
+#include "VariableSize.h"
+
 // See definitions of VBA type definitions in Excel worksheets
 
 struct VBARate{
-	int RateType;
-	int RateSize;
+	long RateType;
+	long RateSize;
 
-    float Ratet[20];
-    float Rater[20];
+    double Ratet[RateTMax];
+    double Rater[RateTMax];
 };
 
 struct VBADiv{
-	int DivType;
-	int DivSize;
+	long DivType;
+	long DivSize;
 
-    float Divt[20];
-    float Divq[20];
+    double Divt[DivTMax];
+    double Divq[DivTMax];
 };
 
 struct VBAVol{
-	int VolType;
-    int VolSizet;
-    int VolSizeK;
+	long VolType;
+    long VolSizet;
+    long VolSizeK;
     
-    float Volt[40];
-    float VolK[21];
-    float Volv[840];
-};
-
-struct VBAYTM{
-	int YTMType;
-    int YTMSize;
-
-    float YTMt[20];
-    float YTMr[20];
+    double Volt[VolTMax];
+    double VolK[VolKMax];
+    double Volv[VolTMax * VolKMax];
 };
 
 struct VBAUnderlying{
-    float S;
+    double S;
+	double BasePrice;
     struct VBARate Rf;
     struct VBADiv Div;
     struct VBAVol Vol;
+	double Quanto;
+	double Corr_row[StockSizeMax];
 };
 
 struct VBAPayoff{
-	int T;
-	int T_pay;
+	long T_exp;
+	long T_pay;
 
-    int BermudanType;
-    int PayoffType;
-	int RefPriceType;
+    long BermudanType;
+    long PayoffType;
+	long RefPriceType;
     
-	float K;
-    float UpBarrier;
-    float DownBarrier;
-    float TotalUpBarrier;
-    float TotalDownBarrier;
-    float Participation;
+	double K;
+    double UpBarrier;
+    double DownBarrier;
+    double TotalUpBarrier;
+    double TotalDownBarrier;
+    double Participation;
 
-    float Coupon;
-	float Dummy;
+    double Coupon;
+	double Dummy;
 };
 
-struct VBAData{
-    int StockSize;
-    int ScheduleSize;
-    
-    struct VBAUnderlying Stock[3];
-    float BasePrice[3];
-    float Correl[9];
-	float Quanto[3];
-    struct VBAPayoff Schedule[60];
-    struct VBAYTM YTM;
-
-	int SimN;
-	int SimMode;
-	int blockN;
-	int threadN;
-	int isStrikePriceQuote;
+struct VBACalcOption{
+	long StockNum;
+	long ScheduleNum;
+	long SimN;
+	long SimMode;
+	long blockN;
+	long threadN;
+	long isStrikePriceQuote;
 };
 
 struct VBAResult{
-    float price;
-    float delta[3];
-    float gamma[3];
-	float vega[3];		// Vega
-	float rho[3];
-	float theta;
-	float vanna[3];		// Vanna
-	float volga[3];		// Volga
+    double price;
+    double delta[StockSizeMax];
+    double gamma[StockSizeMax];
+	double vega[StockSizeMax];		// Vega
+	double rho[StockSizeMax];
+	double theta;
+	double vanna[StockSizeMax];		// Vanna
+	double volga[StockSizeMax];		// Volga
 
-	float prob[60];
+	double prob[ScheduleSizeMax];
 };
