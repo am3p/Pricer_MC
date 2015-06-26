@@ -24,7 +24,7 @@
 #include "MCstruct_VBA.h"
 #include "VariableSize.h"
 
-__declspec(dllexport) struct VBAResult __stdcall Pricer_MC(long NStock, double* StockPrice, double* BasePrice,
+__declspec(dllexport) struct VBAResult __stdcall Solver_MC(long NStock, double* StockPrice, double* BasePrice,
 														   long* RateType, long* RateTNum, double* RateT, double* Rate,
 														   long* DivType, long* DivTNum, double* DivT, double* Div,
 														   long* VolType, long* VolTNum, long* VolKNum, double* VolT, double* VolK, double* Vol,
@@ -33,7 +33,8 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(long NStock, double* 
 														   long NSchedule, long* T_exp, long* T_pay, long* BermudanType, long* PayoffType, long* RefPriceType,
 														   double* Strike, double* UpBarrier, double* DownBarrier, double* Coupon, double* Dummy, double* Participation,
 														   double TotalUpBarrier, double TotalDownBarrier, long isUpTouched, long isDownTouched,
-														   long Mode, long SimN, long blockN, long threadN, long isStrikePriceQuote){
+														   long SimN, long blockN, long threadN, long isStrikePriceQuote,
+														   double Price){
 
 	long i, j, k; double s;
 
@@ -89,6 +90,10 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(long NStock, double* 
 	// Schedule info: Participation rate
 	double Participation_[ScheduleSizeMax] = {0};
 
+	long Solve_Iter = 0;
+	double Coupon_a = 0.0, Coupon_b = 20.0, Coupon_ind = 1.0;
+	double price_diff = 100.0;
+
 	// Result format
 	struct VBAResult* result = (struct VBAResult *) malloc(sizeof(struct VBAResult));
 	struct VBAResult result_VBA;
@@ -105,7 +110,6 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(long NStock, double* 
 	for (i = 0; i < 100; i++){
 		result->prob[i] = 0;
 	}
-	result->coupon = 0;
 
 	// Copying product info for CUDA function
 	for (i = 0; i < NStock; i++){
@@ -288,52 +292,62 @@ __declspec(dllexport) struct VBAResult __stdcall Pricer_MC(long NStock, double* 
 		DownBarrier_[i] = DownBarrier[i];
 
 		Participation_[i] = Participation[i];
-		Coupon_[i] = Coupon[i];
-		Dummy_[i] = Dummy[i];
 	}
 
-	// MC function
-	CalcMC(NStock, StockPrice_, BasePrice_,
-		   NSchedule,	
-		   PayoffT_, PayoffT_pay, BermudanType_, PayoffType_, RefPriceType_,
-		   PayoffK_, Coupon_, Dummy_,
-		   UpBarrier_, DownBarrier_, TotalUpBarrier, TotalDownBarrier,
-		   Participation_,
-		   isUpTouched, isDownTouched,
-		   RateType_, RateSize_, Ratet_, Rate_,
-		   DivType_, DivSize_, Divt_, Div_,
-		   VolType_, VolSize_t_, VolSize_K_, Volt_, VolK_, Vol_,
-		   YTMType_, YTMSize_, YTMt_, YTM_,
-		   StockCorr_LD, QuantoAdj,
-		   isStrikePriceQuote, SimN, Mode, blockN, threadN,
-		   result);
+	// ver 0.1: Bisection method (Need to be modified to Brent's method)
+	while (Solve_Iter < 100){
 
-	// Arrange result
-	result_VBA.price = result->price;
-	for (i = 0; i < ScheduleSizeMax; i++){
-		result_VBA.prob[i] = result->prob[i];
-	}
-	if (Mode > 0){
-		for (i = 0; i < NStock; i++)
-			result_VBA.delta[i] = result->delta[i];
-		for (i = 0; i < NStock; i++)
-			result_VBA.gamma[i] = result->gamma[i];
-		for (i = 0; i < NStock; i++)
-			result_VBA.vega[i] = result->vega[i];
-	}
-	if (Mode > 1){
-		for (i = 0; i < NStock; i++)
-			result_VBA.rho[i] = result->rho[i];
-		result_VBA.theta = result->theta;
-	}
-	if (Mode > 2){
-		for (i = 0; i < NStock; i++)
-			result_VBA.vanna[i] = result->vanna[i];
-		for (i = 0; i < NStock; i++)
-			result_VBA.volga[i] = result->volga[i];
+		if((Coupon_a - Coupon_b < 1e-4 && Coupon_a - Coupon_b > -1e-4) ||
+		   (price_diff < 1e-6 && price_diff > -1e-6))
+			break;
+
+		Coupon_ind = 1;
+		for (i = 0; i < NSchedule; i++){
+			Coupon_[i] = (Coupon_a + Coupon_b)/2.0 * Coupon_ind;
+			if (i < NSchedule-1)
+				Dummy_[i] = 0.0;
+			else
+				Dummy_[i] = Coupon_[i];
+			Coupon_ind++;
+		}
+		result->price = 0;
+
+
+		// MC function
+		CalcMC(NStock, StockPrice_, BasePrice_,
+			   NSchedule,	
+			   PayoffT_, PayoffT_pay, BermudanType_, PayoffType_, RefPriceType_,
+			   PayoffK_, Coupon_, Dummy_,
+			   UpBarrier_, DownBarrier_, TotalUpBarrier, TotalDownBarrier,
+			   Participation_,
+			   isUpTouched, isDownTouched,
+			   RateType_, RateSize_, Ratet_, Rate_,
+			   DivType_, DivSize_, Divt_, Div_,
+			   VolType_, VolSize_t_, VolSize_K_, Volt_, VolK_, Vol_,
+			   YTMType_, YTMSize_, YTMt_, YTM_,
+			   StockCorr_LD, QuantoAdj,
+			   isStrikePriceQuote, SimN, 0, blockN, threadN,
+			   result);
+
+		// Arrange result
+		price_diff = (result->price - Price);
+		if(price_diff > 0)
+			Coupon_b = (Coupon_a + Coupon_b)/2.0;
+		else if(price_diff < 0)
+			Coupon_a = (Coupon_a + Coupon_b)/2.0;
+		else{
+			Coupon_a = (Coupon_a + Coupon_b)/2.0;
+			Coupon_b = Coupon_a;
+			break;
+		}
+
+		Solve_Iter++;
 	}
 
 	free(result);
+
+	result_VBA.price = price_diff + Price;
+	result_VBA.coupon = (Coupon_a + Coupon_b)/2.0;
 	return result_VBA;
 }
 

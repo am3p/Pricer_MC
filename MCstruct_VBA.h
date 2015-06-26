@@ -79,4 +79,6 @@ struct VBAResult{
 	double volga[StockSizeMax];		// Volga
 
 	double prob[ScheduleSizeMax];
+
+	double coupon;
 };

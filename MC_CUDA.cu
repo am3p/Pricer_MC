@@ -41,7 +41,7 @@ __constant__ double Quanto[StockSizeMax];
 // Global Functions: functions are called in CalcMC
 __global__ void InitSeed(curandState *state, const long threadN);
 __global__ void MC(curandState *state, 
-				   const long StockSize, const long ScheduleSize, 
+				   const long StockSize, const long ScheduleSize, const long isUpTouched, const long isDownTouched,
 				   const long YTMType, const long YTMSize, 
 				   const long SimMode, const long isStrikePriceQuote, const long threadN, 
 				   Result *result);
@@ -57,7 +57,7 @@ __device__ double SMax(double S_max[][StockSizeMax], long StockSize, long casenu
 
 __device__ double RefPriceCalc(double S, long StockSize, long sched_ind, long casenum);
 __device__ bool PayoffCheck(double S[][StockSizeMax], double* S_min, double* S_max, long StockSize, long sched_ind, long casenum);
-__device__ double PayoffCalc(double S[][StockSizeMax], double* S_min, double* S_max, long StockSize, long sched_ind, long casenum);
+__device__ double PayoffCalc(double S[][StockSizeMax], double* S_min, double* S_max, long StockSize, long sched_ind, long casenum, long isDownTouched);
 
 // Main function
 void CalcMC(long StockSize_, double* StockPrice_, double* BasePrice_,
@@ -66,6 +66,7 @@ void CalcMC(long StockSize_, double* StockPrice_, double* BasePrice_,
 			double* PayoffK_, double* Coupon_, double* Dummy_,
 			double* UpBarrier_, double* DownBarrier_, double TotalUpBarrier_, double TotalDownBarrier_,
 			double* Participation_,
+			long isUpTouched_, long isDownTouched_,
  			long* RateType_, long* RateSize_, double* Ratet_, double* Rate_,
 			long* DivType_, long* DivSize_, double* Divt_, double* Div_,
  			long* VolType_, long* VolSizet_, long* VolSizeK_, double* Volt_, double* VolK_, double* Vol_,
@@ -194,7 +195,7 @@ void CalcMC(long StockSize_, double* StockPrice_, double* BasePrice_,
 
 	// Main MC part (the repeat number is just own purpose)
 	for (long i = 0; i < SimN_; i++){
-		MC<<<blockN, threadN>>>(devStates, StockSize_, ScheduleSize_, YTMType_, YTMSize_, SimMode_, isStrikePriceQuote_, threadN, devResults);
+		MC<<<blockN, threadN>>>(devStates, StockSize_, ScheduleSize_, isUpTouched_, isDownTouched_, YTMType_, YTMSize_, SimMode_, isStrikePriceQuote_, threadN, devResults);
 		cudaMemcpy(hostResults, devResults, blockN * threadN * sizeof(Result), cudaMemcpyDeviceToHost);
 
 		// Copying MC results
@@ -236,7 +237,7 @@ __global__ void InitSeed(curandState *state, const long threadN)
 
 // Main Monte Carlo part
 __global__ void MC(curandState *state, 
-				   const long StockSize, const long ScheduleSize, 
+				   const long StockSize, const long ScheduleSize, const long isUpTouched, const long isDownTouched,
 				   const long YTMType, const long YTMSize, 
 				   const long SimMode, const long isStrikePriceQuote, const long threadN,
 				   Result *result){ 
@@ -260,16 +261,16 @@ __global__ void MC(curandState *state,
 
 	for (long j = 0; j < StockSize; j++){
 		logS_MC[j] = logS_MCmin[j] = logS_MCmax[j] = log(Stock[j].S);
-		logS_MC_Sp[j] = logS_MCmin_Sp[j] = logS_MCmax_Sp[j] = log(Stock[j].S * 1.01f);
-		logS_MC_Sm[j] = logS_MCmin_Sm[j] = logS_MCmax_Sm[j] = log(Stock[j].S * 0.99f);
+		logS_MC_Sp[j] = logS_MCmin_Sp[j] = logS_MCmax_Sp[j] = log(Stock[j].S * 1.01);
+		logS_MC_Sm[j] = logS_MCmin_Sm[j] = logS_MCmax_Sm[j] = log(Stock[j].S * 0.99);
 
 		logS_MC_vp[j] = logS_MCmin_vp[j] = logS_MCmax_vp[j] = log(Stock[j].S);
-		logS_MC_vpSp[j] = logS_MCmin_vpSp[j] = logS_MCmax_vpSp[j] = log(Stock[j].S * 1.01f);
-		logS_MC_vpSm[j] = logS_MCmin_vpSm[j] = logS_MCmax_vpSm[j] = log(Stock[j].S * 0.99f);
+		logS_MC_vpSp[j] = logS_MCmin_vpSp[j] = logS_MCmax_vpSp[j] = log(Stock[j].S * 1.01);
+		logS_MC_vpSm[j] = logS_MCmin_vpSm[j] = logS_MCmax_vpSm[j] = log(Stock[j].S * 0.99);
 
 		logS_MC_vm[j] = logS_MCmin_vm[j] = logS_MCmax_vm[j] = log(Stock[j].S);
-		logS_MC_vmSp[j] = logS_MCmin_vmSp[j] = logS_MCmax_vmSp[j] = log(Stock[j].S * 1.01f);
-		logS_MC_vmSm[j] = logS_MCmin_vmSm[j] = logS_MCmax_vmSm[j] = log(Stock[j].S * 0.99f);
+		logS_MC_vmSp[j] = logS_MCmin_vmSp[j] = logS_MCmax_vmSp[j] = log(Stock[j].S * 1.01);
+		logS_MC_vmSm[j] = logS_MCmin_vmSm[j] = logS_MCmax_vmSm[j] = log(Stock[j].S * 0.99);
 
 		logS_MC_rp[j] = logS_MCmin_rp[j] = logS_MCmax_rp[j] = log(Stock[j].S);
 		logS_MC_tm[j] = logS_MCmin_tm[j] = logS_MCmax_tm[j] = log(Stock[j].S);
@@ -311,7 +312,7 @@ __global__ void MC(curandState *state,
 	// Simulation part
 	for(long i = 0; i < ScheduleSize; i++){ 
 		// Innovate until next redemption schedule
-		while (t <= Schedule[i].T){
+		while (t < Schedule[i].T){
 			// Generate independent Brownian motion
 			for (long j = 0; j < StockSize; j++){
 				W_MC_indep[j] = curand_normal(&state[id])*sqrt(dt);
@@ -540,7 +541,7 @@ __global__ void MC(curandState *state,
 		Smax[0] = SMax(S_Payoffmax, StockSize, 0);
 		if (price_status == 0){
 			if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, 0)){					// Checking Redemption
-				price_tmp = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, 0) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+				price_tmp = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, 0, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 				price_status++;
 				result[id].prob = i;
 			}
@@ -579,14 +580,14 @@ __global__ void MC(curandState *state,
 			for (long j = 0; j < 2*StockSize; j++){
 				if (delta_status[j] == 0){
 					if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, j)){					// Checking Redemption
-						delta_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+						delta_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 						(delta_status[j])++;
 					}
 				}
 
 				if (gamma_status[j] == 0){
 					if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, j)){					// Checking Redemption
-						gamma_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+						gamma_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 						(gamma_status[j])++;
 					}
 				}
@@ -623,7 +624,7 @@ __global__ void MC(curandState *state,
 			for (long j = 0; j < 2*StockSize; j++){
 				if (vega_status[j] == 0){
 					if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, j)){					// Checking Redemption
-						vega_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+						vega_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 						(vega_status[j])++;
 					}
 				}
@@ -657,10 +658,10 @@ __global__ void MC(curandState *state,
 				if (rho_status[j] == 0){
 					if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, j)){					// Checking Redemption
 						if (j == 0){
-							rho_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytmp*(double)(Schedule[i].T_pay)*dt);
+							rho_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytmp*(double)(Schedule[i].T_pay)*dt);
 						}
 						else{
-							rho_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+							rho_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 						}
 						(rho_status[j])++;
 					}
@@ -679,7 +680,7 @@ __global__ void MC(curandState *state,
 			}
 			if (theta_status < 1){
 				if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, 0)){					// Checking Redemption
-					theta_tmp = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, 0) * expf(-ytmtm*(double)(Schedule[i].T_pay-1)*dt);
+					theta_tmp = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, 0, isDownTouched) * expf(-ytmtm*(double)(Schedule[i].T_pay-1)*dt);
 					theta_status++;
 				}
 			}
@@ -729,7 +730,7 @@ __global__ void MC(curandState *state,
 			for (long j = 0; j < 4*StockSize; j++){
 				if (vanna_status[j] == 0){
 					if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, j)){					// Checking Redemption
-						vanna_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+						vanna_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 						(vanna_status[j])++;
 					}
 				}	
@@ -766,7 +767,7 @@ __global__ void MC(curandState *state,
 			for (long j = 0; j < 2*StockSize; j++){
 				if (volga_status[j] == 0){
 					if(PayoffCheck(S_Payoff, Smin, Smax, StockSize, i, j)){					// Checking Redemption
-						volga_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
+						volga_tmp[j] = PayoffCalc(S_Payoff, Smin, Smax, StockSize, i, j, isDownTouched) * expf(-ytm*(double)(Schedule[i].T_pay)*dt);
 						(volga_status[j])++;
 					}
 				}
@@ -777,9 +778,9 @@ __global__ void MC(curandState *state,
 	result[id].price = price_tmp;
 	if (SimMode > 0){
 		for (long i = 0; i < StockSize; i++)
-			result[id].delta[i] = (delta_tmp[2*i] - delta_tmp[2*i+1]) / (2.0f * 0.01f * Stock[i].S);
+			result[id].delta[i] = (delta_tmp[2*i] - delta_tmp[2*i+1]) / (2.0 * 0.01 * Stock[i].S);
 		for (long i = 0; i < StockSize; i++)
-			result[id].gamma[i] = (gamma_tmp[2*i] - 2.0f * price_tmp + gamma_tmp[2*i+1]) / (0.01f * Stock[i].S * 0.01f * Stock[i].S);
+			result[id].gamma[i] = (gamma_tmp[2*i] - 2.0 * price_tmp + gamma_tmp[2*i+1]) / (0.01 * Stock[i].S * 0.01 * Stock[i].S);
 		for (long i = 0; i < StockSize; i++)
 			result[id].vega[i] = (vega_tmp[2*i] - vega_tmp[2*i+1]) / 2.0f;
 	}
@@ -798,25 +799,53 @@ __global__ void MC(curandState *state,
 }
 
 
-// YTM longerp/extrapolation
+//// YTM longerp/extrapolation
+//__device__ double YTMInterp(double t, long YTMType, long YTMSize){
+//	double r = 0; 
+//	double t_prior = 0; double r_prior; 
+//	double YTM_longerp;
+//	long tind = 0;
+//	if (YTMType == 0)
+//		r = YTM[0];
+//	else if (YTMType == 1){
+//		r_prior = YTM[0];
+//		while (t > YTMt[tind]){
+//			r += (r_prior + YTM[tind]) / 2.0 * (YTMt[tind] - t_prior);
+//			t_prior = YTMt[tind];
+//			r_prior = YTM[tind];
+//			tind++;
+//		}
+//		YTM_longerp = YTM[tind-1] + (YTM[tind] - YTM[tind-1])/(YTMt[tind] - YTMt[tind-1])*(t-YTMt[tind]);
+//		r += (r_prior + YTM_longerp) / 2.0 * (t - t_prior);
+//		r /= t;
+//	}
+//	return r;
+//}
+
 __device__ double YTMInterp(double t, long YTMType, long YTMSize){
-	double r = 0; 
-	double t_prior = 0; double r_prior; 
-	double YTM_longerp;
+	double r;
 	long tind = 0;
+
+	// Fixed case
 	if (YTMType == 0)
 		r = YTM[0];
+
+	// Term-structure case
 	else if (YTMType == 1){
-		r_prior = YTM[0];
-		while (t > YTMt[tind]){
-			r += (r_prior + YTM[tind]) / 2.0 * (YTMt[tind] - t_prior);
-			t_prior = YTMt[tind];
-			r_prior = YTM[tind];
+		while (t > YTMt[tind] && tind < YTMSize){
 			tind++;
+			if (tind == YTMSize)	break;
 		}
-		YTM_longerp = YTM[tind-1] + (YTM[tind] - YTM[tind-1])/(YTMt[tind] - YTMt[tind-1])*(t-YTMt[tind]);
-		r += (r_prior + YTM_longerp) / 2.0 * (t - t_prior);
-		r /= t;
+		
+	// nearest extrapolation
+		if (tind == 0)				r = YTM[0];
+		else if (tind == YTMSize)	r = YTM[YTMSize-1];
+		else{
+			// linear longerpolation
+			r = YTM[tind-1] + 
+				(YTM[tind] - YTM[tind-1])/(YTMt[tind] - YTMt[tind-1]) *
+				 (t-YTMt[tind-1]);
+		}
 	}
 	return r;
 }
@@ -1044,7 +1073,7 @@ __device__ bool PayoffCheck(double S[][StockSizeMax], double* S_min, double* S_m
 }
 
 // Payoff amount calculation (if redeem)
-__device__ double PayoffCalc(double S[][StockSizeMax], double* S_min, double* S_max, long StockSize, long sched_ind, long casenum){
+__device__ double PayoffCalc(double S[][StockSizeMax], double* S_min, double* S_max, long StockSize, long sched_ind, long casenum, long isDownTouched){
 	double result = 0;
 	switch(Schedule[sched_ind].BermudanType){
 		// Final case
@@ -1055,9 +1084,15 @@ __device__ double PayoffCalc(double S[][StockSizeMax], double* S_min, double* S_
 					case 1:
 						{
 							double PayoffPrice = RefPriceCalc(S, StockSize, sched_ind, casenum);
-							if (PayoffPrice > Schedule[sched_ind].K)						result = 100.0 + Schedule[sched_ind].Coupon;
-							else if (S_min[casenum] > Schedule[sched_ind].TotalDownBarrier)	result = 100.0 + Schedule[sched_ind].Dummy;
-							else															result = SMin(S, StockSize, casenum);
+							if (isDownTouched != 1){
+								if (PayoffPrice > Schedule[sched_ind].K)						result = 100.0 + Schedule[sched_ind].Coupon;
+								else if (S_min[casenum] > Schedule[sched_ind].TotalDownBarrier)	result = 100.0 + Schedule[sched_ind].Dummy;
+								else															result = SMin(S, StockSize, casenum);
+							}
+							else{
+								if (PayoffPrice > Schedule[sched_ind].K)						result = 100.0 + Schedule[sched_ind].Coupon;
+								else															result = SMin(S, StockSize, casenum);
+							}
 							break;
 						}
 					// DIGITCALL
@@ -1078,8 +1113,10 @@ __device__ double PayoffCalc(double S[][StockSizeMax], double* S_min, double* S_
 							float PayoffPrice = RefPriceCalc(S, StockSize, sched_ind, casenum);
 							if (S_max[casenum] < Schedule[sched_ind].TotalUpBarrier)
 							{
-								if (PayoffPrice > Schedule[sched_ind].K)
+								if (PayoffPrice > Schedule[sched_ind].K && PayoffPrice < Schedule[sched_ind].UpBarrier)
 									result = Schedule[sched_ind].Participation * (PayoffPrice - Schedule[sched_ind].K) + Schedule[sched_ind].Coupon;
+								else if (PayoffPrice > Schedule[sched_ind].UpBarrier && PayoffPrice < Schedule[sched_ind].TotalUpBarrier)
+									result = Schedule[sched_ind].Participation * (Schedule[sched_ind].TotalUpBarrier - PayoffPrice) + Schedule[sched_ind].Coupon;
 								else
 									result = Schedule[sched_ind].Coupon;
 							}
